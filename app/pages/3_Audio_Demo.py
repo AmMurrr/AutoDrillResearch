@@ -1,6 +1,18 @@
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
+from reference_db import REFERENCE_DIR, add_reference_path, init_db
+
+init_db()
+
+
+def save_to_reference(data: bytes, suffix: str, prefix: str) -> str:
+    REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+    output_path = REFERENCE_DIR / filename
+    output_path.write_bytes(data)
+    return output_path.relative_to(Path.cwd()).as_posix()
 
 st.title("Audio Demo")
 st.caption("Демонстрация приема аудиосигнала через Streamlit")
@@ -21,6 +33,10 @@ if recorded_audio is not None:
             "captured_at": datetime.now().isoformat(timespec="seconds"),
         }
     )
+    if st.button("Сохранить запись в data/reference"):
+        rel_path = save_to_reference(recorded_audio.getvalue(), ".wav", "mic")
+        add_reference_path(rel_path, "from_mic")
+        st.success(f"Сохранено и добавлено в БД: {rel_path}")
 
 st.divider()
 
@@ -41,4 +57,9 @@ if uploaded is not None:
             "size_bytes": uploaded.size,
         }
     )
+    if st.button("Сохранить файл в data/reference"):
+        ext = Path(uploaded.name).suffix.lower() or ".wav"
+        rel_path = save_to_reference(uploaded.getvalue(), ext, "upload")
+        add_reference_path(rel_path, "from_upload")
+        st.success(f"Сохранено и добавлено в БД: {rel_path}")
 

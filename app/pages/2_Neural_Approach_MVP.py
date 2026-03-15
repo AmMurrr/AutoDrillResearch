@@ -1,15 +1,23 @@
 from pathlib import Path
 
 import streamlit as st
+from reference_db import init_db, list_reference_paths
 
 st.title("ML MVP")
+init_db()
 
 
 st.markdown("### Входные данные")
-reference_path = st.text_input(
-    "Путь к эталонному аудио",
-    value="data/reference/sample_reference.wav",
+references = list_reference_paths()
+reference_options = ["data/reference/sample_reference.wav"] + [r["path"] for r in references]
+
+selected_reference = st.selectbox(
+    "Эталон из SQLite",
+    options=reference_options,
 )
+manual_reference = st.text_input("Или укажите путь вручную (приоритет)", value="")
+reference_path = manual_reference.strip() or selected_reference
+
 attempt_path = st.text_input(
     "Путь к аудио пользователя",
     value="data/attempts/sample_attempt.wav",
