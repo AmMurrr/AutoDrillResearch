@@ -1,6 +1,6 @@
 import streamlit as st
 
-from reference_db import (
+from app.reference_db import (
     DB_PATH,
     REFERENCE_DIR,
     add_reference_path,

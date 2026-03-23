@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import streamlit as st
-from reference_db import init_db, list_reference_paths
+from app.reference_db import init_db, list_reference_paths
 
 st.title("ML MVP")
 init_db()

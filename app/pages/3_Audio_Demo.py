@@ -2,7 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
-from reference_db import REFERENCE_DIR, add_reference_path, init_db
+from app.reference_db import REFERENCE_DIR, add_reference_path, init_db
 
 init_db()
 

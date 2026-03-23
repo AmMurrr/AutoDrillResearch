@@ -1,2 +1,10 @@
 .venv
 plan.md
+diploma_pronunciation.egg-info
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
