@@ -4,18 +4,30 @@ import librosa
 import numpy as np
 
 
+def apply_cmvn(mfcc: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+	"""CMVN (Cepstral Mean and Variance Normalization)"""
+	if mfcc.ndim != 2 or mfcc.shape[1] == 0:
+		return mfcc
+
+	mean = np.mean(mfcc, axis=1, keepdims=True)
+	std = np.std(mfcc, axis=1, keepdims=True)
+	std = np.maximum(std, eps)
+	return (mfcc - mean) / std
+
+
 def extract_mfcc(
 	samples: np.ndarray,
 	sample_rate: int,
 	n_mfcc: int = 20,
 	frame_ms: int = 25,
 	hop_ms: int = 10,
+	use_cmvn: bool = True,
 ) -> np.ndarray:
 	win_length = int(sample_rate * (frame_ms / 1000.0))
 	hop_length = int(sample_rate * (hop_ms / 1000.0))
 	n_fft = max(512, int(2 ** np.ceil(np.log2(max(win_length, 1)))))
 
-	return librosa.feature.mfcc(
+	mfcc = librosa.feature.mfcc(
 		y=samples,
 		sr=sample_rate,
 		n_mfcc=n_mfcc,
@@ -23,3 +35,7 @@ def extract_mfcc(
 		hop_length=max(hop_length, 1),
 		win_length=max(win_length, 1),
 	)
+
+	if use_cmvn:
+		return apply_cmvn(mfcc)
+	return mfcc
