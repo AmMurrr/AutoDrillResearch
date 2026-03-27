@@ -8,7 +8,18 @@ from .preprocessing import preprocess_audio
 from .scorer import ComputeScoringResult, ScoringResult
 
 
+def _distance_to_score(distance: float, user_frames: int, reference_frames: int) -> float:
 
+    base_score = 100.0 * np.exp(-3.0 * distance)
+
+   
+    frame_ratio = max(user_frames, reference_frames) / max(1, min(user_frames, reference_frames))
+    duration_penalty = np.exp(-1.2 * np.log(frame_ratio))
+
+    return float(np.clip(base_score * duration_penalty, 0.0, 100.0))
+
+
+# Основной анализ
 def analyze(
     user_audio_path: str,
     reference_audio_path: str,
@@ -39,13 +50,15 @@ def analyze(
 
     # если MFCC не удалось извлечь
     if user_mfcc.shape[1] == 0 or reference_mfcc.shape[1] == 0:
-        return ComputeScoringResult(0.0, [])
+        return ComputeScoringResult(0.0, [], float("inf"))
 
     # вычисление DTW расстояния 
     distance = dtw_distance(user_mfcc, reference_mfcc)
     if not np.isfinite(distance):
-        return ComputeScoringResult(0.0, [])
+        return ComputeScoringResult(0.0, [], float("inf"))
 
-    # простая формула для преобразования расстояния в оценку от 0 до 100
-    score = 100.0 / (1.0 + distance)
-    return ComputeScoringResult(score, [])
+    # преобразование расстояния в оценку
+    user_frames = user_mfcc.shape[1]
+    reference_frames = reference_mfcc.shape[1]
+    score = _distance_to_score(distance, user_frames, reference_frames)
+    return ComputeScoringResult(score, [], distance)

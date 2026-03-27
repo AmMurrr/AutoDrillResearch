@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import dtaidistance
+import dtaidistance.dtw_ndim as dtw_ndim
 import numpy as np
 
 # Преобразование 2D массива MFCC (n_mfcc x n_frames) в 2D массив (n_frames x n_mfcc) для DTW
@@ -20,8 +20,11 @@ def dtw_distance(features_a: np.ndarray, features_b: np.ndarray) -> float:
     if n == 0 or m == 0:
         return float("inf")
 
-    seq_a_1d = np.linalg.norm(seq_a, axis=1).astype(np.double)
-    seq_b_1d = np.linalg.norm(seq_b, axis=1).astype(np.double)
+    # Многомерное DTW расстояние с нормализацией по длине и размерности признаков
+    seq_a_nd = seq_a.astype(np.double)
+    seq_b_nd = seq_b.astype(np.double)
+    feature_dim = max(1, seq_a_nd.shape[1])
 
-    distance = float(dtaidistance.dtw.distance(seq_a_1d, seq_b_1d))
-    return distance / (n + m)
+    distance = float(dtw_ndim.distance(seq_a_nd, seq_b_nd))
+   
+    return distance / (max(n, m) * np.sqrt(feature_dim))

@@ -85,6 +85,7 @@ if st.button("Запустить MVP", type="primary"):
                 "pronunciation_score": result.dtw_score,
                 "verdict": result.verdict,
                 "problematic_phonemes": result.problematic_phonemes,
+                "distance": result.distance,
             }
         )
 

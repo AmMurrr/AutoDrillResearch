@@ -8,9 +8,10 @@ class ScoringResult:
     dtw_score: float
     problematic_phonemes: List[str]
     verdict: str
+    distance: float
 
 
-def ComputeScoringResult(dtw_score, phoneme_issues) -> ScoringResult:
+def ComputeScoringResult(dtw_score, phoneme_issues, distance) -> ScoringResult:
     score = max(0.0, min(100.0, float(dtw_score)))
     if score >= 80.0:
         verdict = "good"
@@ -23,4 +24,5 @@ def ComputeScoringResult(dtw_score, phoneme_issues) -> ScoringResult:
         dtw_score=score,
         problematic_phonemes=list(phoneme_issues or []),
         verdict=verdict,
+        distance=distance,
     )
