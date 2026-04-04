@@ -9,12 +9,18 @@ from .scorer import ComputeScoringResult, ScoringResult
 
 
 def _distance_to_score(distance: float, user_frames: int, reference_frames: int) -> float:
-
-    base_score = 100.0 * np.exp(-3.0 * distance)
-
-   
+    # Hill mapping: keeps close pronunciations high, but quickly suppresses bad matches.
+    # Tune DISTANCE_MID and SHAPE on your validation split.
+    DISTANCE_MID = 0.25
+    SHAPE = 20.0
+    base_score = 100.0 / (1.0 + (max(distance, 0.0) / DISTANCE_MID) ** SHAPE)
+    # до 89 опускается и всё, баг исправить
+    
+    # Duration mismatch should influence score, but not dominate it.
     frame_ratio = max(user_frames, reference_frames) / max(1, min(user_frames, reference_frames))
-    duration_penalty = np.exp(-1.2 * np.log(frame_ratio))
+    log_ratio = abs(np.log(frame_ratio))
+    duration_penalty = np.exp(-0.25 * log_ratio)
+    duration_penalty = float(np.clip(duration_penalty, 0.9, 1.0))
 
     return float(np.clip(base_score * duration_penalty, 0.0, 100.0))
 
