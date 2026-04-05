@@ -15,7 +15,8 @@ def analyze(
 	device: str | None = None,
 	hf_token: str | None = None,
 ) -> ScoringResult:
-	# transcript is reserved for future per-word/per-phoneme diagnostics.
+	# transcript пока не используется в логике, оставлен для будущей
+	# диагностики по словам/фонемам.
 	_ = transcript
 
 	user_audio = preprocess_audio(user_audio_path)

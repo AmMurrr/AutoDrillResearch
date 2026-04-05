@@ -40,9 +40,9 @@ def test_compute_scoring_result_verdict_thresholds() -> None:
     acceptable = compute_scoring_result(0.4, 0.1, metric="cosine", model_name="m")
     weak = compute_scoring_result(-0.9, 0.8, metric="cosine", model_name="m")
 
-    assert good.verdict == "good"
-    assert acceptable.verdict == "acceptable"
-    assert weak.verdict == "needs_improvement"
+    assert good.verdict == "хорошо"
+    assert acceptable.verdict == "удовлетворительно"
+    assert weak.verdict == "неудовлетворительно"
 
 
 def test_neural_pipeline_analyze_happy_path(monkeypatch) -> None:
@@ -81,7 +81,7 @@ def test_neural_pipeline_analyze_happy_path(monkeypatch) -> None:
     result = analyze("user.wav", "ref.wav", transcript="hello", similarity="cosine")
 
     assert result.pronunciation_score > 95.0
-    assert result.verdict == "good"
+    assert result.verdict == "хорошо"
     assert result.metric == "cosine"
 
 

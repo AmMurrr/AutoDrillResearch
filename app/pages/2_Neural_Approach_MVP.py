@@ -6,6 +6,29 @@ from neural_approach.pipeline import analyze
 from neural_approach.wav2vec_extractor import DEFAULT_MODEL_NAME
 from app.reference_db import init_db, list_reference_paths
 
+
+def _verdict_to_russian(verdict: str) -> str:
+    verdict_map = {
+        "good": "хорошо",
+        "acceptable": "удовлетворительно",
+        "needs_improvement": "неудовлетворительно",
+        "хорошо": "хорошо",
+        "удовлетворительно": "удовлетворительно",
+        "неудовлетворительно": "неудовлетворительно",
+    }
+    return verdict_map.get(verdict, verdict)
+
+
+def _render_verdict_block(verdict: str) -> None:
+    verdict_ru = _verdict_to_russian(verdict)
+    if verdict_ru == "хорошо":
+        st.success("Итог: произношение близко к эталону по качеству и темпу.")
+    elif verdict_ru == "удовлетворительно":
+        st.warning("Итог: качество приемлемое, но есть зоны для улучшения.")
+    else:
+        st.error("Итог: требуется дополнительная практика и повторная попытка.")
+
+
 st.title("Нейросетевой MVP")
 init_db()
 
@@ -86,20 +109,51 @@ if st.button("Запустить MVP", type="primary"):
                 st.error(f"Ошибка при анализе: {exc}")
             else:
                 st.success("MVP выполнен")
-                st.write(
-                    {
-                        "reference_exists": ref_exists,
-                        "attempt_exists": att_exists,
-                        "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
-                        "attempt_path_used": resolved_attempt_path,
-                        "transcript": transcript,
-                        "metric": result.metric,
-                        "model_name": result.model_name,
-                        "pronunciation_score": result.pronunciation_score,
-                        "verdict": result.verdict,
-                        "embedding_similarity": result.similarity,
-                        "temporal_distance": result.temporal_distance,
-                        "problematic_phonemes": result.problematic_phonemes,
-                    }
-                )
+                result_payload = {
+                    "reference_exists": ref_exists,
+                    "attempt_exists": att_exists,
+                    "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
+                    "attempt_path_used": resolved_attempt_path,
+                    "transcript": transcript,
+                    "metric": result.metric,
+                    "model_name": result.model_name,
+                    "pronunciation_score": result.pronunciation_score,
+                    "verdict": result.verdict,
+                    "embedding_similarity": result.similarity,
+                    "temporal_distance": result.temporal_distance,
+                    "problematic_phonemes": result.problematic_phonemes,
+                }
+
+                verdict_ru = _verdict_to_russian(result.verdict)
+
+                st.markdown("### Красивый результат")
+                metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+                with metric_col_1:
+                    st.metric("Оценка произношения", f"{result.pronunciation_score:.1f} / 100")
+                with metric_col_2:
+                    st.metric("Вердикт", verdict_ru)
+                with metric_col_3:
+                    st.metric("Сходство эмбеддингов", f"{result.similarity:.4f}")
+                with metric_col_4:
+                    st.metric("Временная дистанция", f"{result.temporal_distance:.4f}")
+
+                st.progress(int(max(0, min(100, round(result.pronunciation_score)))))
+                _render_verdict_block(result.verdict)
+
+                details_col_1, details_col_2 = st.columns(2)
+                with details_col_1:
+                    st.markdown("**Модель**")
+                    st.info(result.model_name)
+                with details_col_2:
+                    st.markdown("**Метрика**")
+                    st.info(result.metric)
+
+                st.markdown("#### Проблемные зоны")
+                if result.problematic_phonemes:
+                    st.write(", ".join(result.problematic_phonemes))
+                else:
+                    st.info("Явных проблемных зон не обнаружено.")
+
+                with st.expander("DEBUG"):
+                    st.write(result_payload)
 

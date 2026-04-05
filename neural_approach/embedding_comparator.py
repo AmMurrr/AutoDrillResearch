@@ -65,10 +65,10 @@ def compare_embeddings(
 	ref_pooled = _pooled_embedding(ref_frames)
 
 	if metric_key == "cosine":
-		# Cosine similarity is naturally in [-1, 1].
+		# Косинусное сходство естественно лежит в диапазоне [-1, 1].
 		similarity = _cosine_similarity(user_pooled, ref_pooled)
 	else:
-		# Convert Euclidean distance to (0, 1] similarity for score calibration.
+		# Преобразуем евклидово расстояние в сходство (0, 1] для калибровки score.
 		pooled_distance = float(np.linalg.norm(user_pooled - ref_pooled))
 		similarity = float(np.exp(-pooled_distance))
 

@@ -20,7 +20,7 @@ class ScoringResult:
 def _similarity_to_quality(similarity: float, metric: str) -> float:
 	metric_key = metric.strip().lower()
 	if metric_key == "cosine":
-		# Map cosine from [-1, 1] to [0, 1] for stable score fusion.
+		# Переводим cosine из диапазона [-1, 1] в [0, 1] для стабильного объединения метрик.
 		quality = (float(similarity) + 1.0) / 2.0
 	else:
 		quality = float(similarity)
@@ -30,7 +30,8 @@ def _similarity_to_quality(similarity: float, metric: str) -> float:
 def _temporal_distance_to_quality(distance: float) -> float:
 	if not np.isfinite(distance):
 		return 0.0
-	# Exponential decay: small DTW distances stay near 1.0, bad alignments drop quickly.
+	# Экспоненциальный спад: малые DTW-дистанции дают качество близкое к 1.0,
+	# а плохое выравнивание быстро снижает итог.
 	quality = np.exp(-3.5 * max(float(distance), 0.0))
 	return float(np.clip(quality, 0.0, 1.0))
 
@@ -45,16 +46,17 @@ def compute_scoring_result(
 	similarity_quality = _similarity_to_quality(similarity, metric)
 	temporal_quality = _temporal_distance_to_quality(temporal_distance)
 
-	# Keep global pronunciation similarity primary, but still account for time alignment.
+	# Основной вклад даёт общее сходство произношения,
+	# но временное выравнивание тоже учитывается.
 	score = 100.0 * (0.7 * similarity_quality + 0.3 * temporal_quality)
 	score = float(np.clip(score, 0.0, 100.0))
 
 	if score >= 80.0:
-		verdict = "good"
+		verdict = "хорошо"
 	elif score >= 60.0:
-		verdict = "acceptable"
+		verdict = "удовлетворительно"
 	else:
-		verdict = "needs_improvement"
+		verdict = "неудовлетворительно"
 
 	return ScoringResult(
 		pronunciation_score=score,
