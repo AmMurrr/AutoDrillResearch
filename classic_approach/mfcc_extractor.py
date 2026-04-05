@@ -5,7 +5,7 @@ import numpy as np
 
 
 def apply_cmvn(mfcc: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-	"""CMVN (Cepstral Mean and Variance Normalization)"""
+	"""CMVN: нормализация кепстральных признаков по среднему и дисперсии."""
 	if mfcc.ndim != 2 or mfcc.shape[1] == 0:
 		return mfcc
 

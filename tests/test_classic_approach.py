@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from classic_approach.dtw import dtw_distance
+from classic_approach.forced_aligner import pseudo_localize_errors
 from classic_approach.mfcc_extractor import apply_cmvn
 from classic_approach.pipeline import _distance_to_score, analyze
 
@@ -45,6 +46,19 @@ def test_distance_to_score_monotonicity() -> None:
     assert good > bad
 
 
+def test_pseudo_localize_errors_marks_end_of_word() -> None:
+    reference = np.zeros((2, 12), dtype=np.float32)
+    user = reference.copy()
+    user[:, 8:] = 4.0
+
+    diagnostics = pseudo_localize_errors(user, reference, transcript="hello")
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["word"] == "hello"
+    assert diagnostics[0]["problem_zone"] == "конец"
+    assert diagnostics[0]["is_problematic"] is True
+
+
 def test_classic_analyze_happy_path(monkeypatch) -> None:
     user_audio = SimpleNamespace(samples=np.ones(1600, dtype=np.float32), sample_rate=16000)
     ref_audio = SimpleNamespace(samples=np.ones(1600, dtype=np.float32), sample_rate=16000)
@@ -68,8 +82,10 @@ def test_classic_analyze_happy_path(monkeypatch) -> None:
     result = analyze("user.wav", "ref.wav", transcript="hello")
 
     assert result.dtw_score == 100.0
-    assert result.verdict == "good"
+    assert result.verdict == "хорошо"
     assert result.distance == 0.0
+    assert len(result.error_localization) == 1
+    assert result.error_localization[0]["word"] == "hello"
 
 
 def test_classic_analyze_empty_features_returns_zero(monkeypatch) -> None:
@@ -84,5 +100,6 @@ def test_classic_analyze_empty_features_returns_zero(monkeypatch) -> None:
     result = analyze("user.wav", "ref.wav", transcript="hello")
 
     assert result.dtw_score == 0.0
-    assert result.verdict == "needs_improvement"
+    assert result.verdict == "неудовлетворительно"
     assert np.isinf(result.distance)
+    assert result.error_localization == []

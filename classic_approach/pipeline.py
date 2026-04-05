@@ -3,20 +3,19 @@ from __future__ import annotations
 import numpy as np
 
 from .dtw import dtw_distance
+from .forced_aligner import pseudo_localize_errors
 from .mfcc_extractor import extract_mfcc
 from .preprocessing import preprocess_audio
 from .scorer import ComputeScoringResult, ScoringResult
 
 
 def _distance_to_score(distance: float, user_frames: int, reference_frames: int) -> float:
-    # Hill mapping: keeps close pronunciations high, but quickly suppresses bad matches.
-    # Tune DISTANCE_MID and SHAPE on your validation split.
     DISTANCE_MID = 0.25
     SHAPE = 20.0
     base_score = 100.0 / (1.0 + (max(distance, 0.0) / DISTANCE_MID) ** SHAPE)
     # до 89 опускается и всё, баг исправить
     
-    # Duration mismatch should influence score, but not dominate it.
+    
     frame_ratio = max(user_frames, reference_frames) / max(1, min(user_frames, reference_frames))
     log_ratio = abs(np.log(frame_ratio))
     duration_penalty = np.exp(-0.25 * log_ratio)
@@ -56,15 +55,33 @@ def analyze(
 
     # если MFCC не удалось извлечь
     if user_mfcc.shape[1] == 0 or reference_mfcc.shape[1] == 0:
-        return ComputeScoringResult(0.0, [], float("inf"))
+        return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
 
     # вычисление DTW расстояния 
     distance = dtw_distance(user_mfcc, reference_mfcc)
     if not np.isfinite(distance):
-        return ComputeScoringResult(0.0, [], float("inf"))
+        return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
 
     # преобразование расстояния в оценку
     user_frames = user_mfcc.shape[1]
     reference_frames = reference_mfcc.shape[1]
     score = _distance_to_score(distance, user_frames, reference_frames)
-    return ComputeScoringResult(score, [], distance)
+
+    error_localization = pseudo_localize_errors(
+        user_mfcc=user_mfcc,
+        reference_mfcc=reference_mfcc,
+        transcript=transcript,
+    )
+
+    problematic_regions = [
+        f"{entry['word']}:{entry['problem_zone']}"
+        for entry in error_localization
+        if bool(entry.get("is_problematic"))
+    ]
+
+    return ComputeScoringResult(
+        score,
+        problematic_regions,
+        distance,
+        error_localization=error_localization,
+    )

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import Any, List
 
 
 
@@ -9,20 +9,27 @@ class ScoringResult:
     problematic_phonemes: List[str]
     verdict: str
     distance: float
+    error_localization: List[dict[str, Any]]
 
 
-def ComputeScoringResult(dtw_score, phoneme_issues, distance) -> ScoringResult:
+def ComputeScoringResult(
+    dtw_score,
+    phoneme_issues,
+    distance,
+    error_localization=None,
+) -> ScoringResult:
     score = max(0.0, min(100.0, float(dtw_score)))
     if score >= 80.0:
-        verdict = "good"
+        verdict = "хорошо"
     elif score >= 60.0:
-        verdict = "acceptable"
+        verdict = "удовлетворительно"
     else:
-        verdict = "needs_improvement"
+        verdict = "неудовлетворительно"
 
     return ScoringResult(
         dtw_score=score,
         problematic_phonemes=list(phoneme_issues or []),
         verdict=verdict,
         distance=distance,
+        error_localization=list(error_localization or []),
     )

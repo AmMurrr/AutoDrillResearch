@@ -75,17 +75,18 @@ if st.button("Запустить MVP", type="primary"):
         st.success("MVP выполнен")
         st.write(
             {
-                "reference_exists": ref_exists,
-                "attempt_exists": att_exists,
-                "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
-                "attempt_path_used": resolved_attempt_path,
+                "эталон_найден": ref_exists,
+                "попытка_найдена": att_exists,
+                "режим_ввода": "аудио_из_streamlit" if audio_source is not None else "путь_вручную",
+                "использованный_путь_попытки": resolved_attempt_path,
                 "n_mfcc": n_mfcc,
                 "frame_ms": frame_ms,
                 "hop_ms": hop_ms,
-                "pronunciation_score": result.dtw_score,
-                "verdict": result.verdict,
-                "problematic_phonemes": result.problematic_phonemes,
-                "distance": result.distance,
+                "оценка_произношения": result.dtw_score,
+                "вердикт": result.verdict,
+                "проблемные_зоны": result.problematic_phonemes,
+                "dtw_дистанция": result.distance,
+                "локализация_ошибок": result.error_localization,
             }
         )
 
