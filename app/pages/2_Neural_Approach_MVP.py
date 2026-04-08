@@ -72,7 +72,6 @@ with col3:
 hf_token = st.text_input(
     "HF_TOKEN (опционально)",
     value="",
-    type="password",
     help="Если поле пустое, будет использована переменная окружения HF_TOKEN (если задана).",
 )
 
@@ -126,7 +125,7 @@ if st.button("Запустить MVP", type="primary"):
 
                 verdict_ru = _verdict_to_russian(result.verdict)
 
-                st.markdown("### Красивый результат")
+                st.markdown("### Результат")
                 metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
                 with metric_col_1:
                     st.metric("Оценка произношения", f"{result.pronunciation_score:.1f} / 100")

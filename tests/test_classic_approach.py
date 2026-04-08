@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+from pathlib import Path
 
 import numpy as np
 
@@ -8,6 +8,21 @@ from classic_approach.dtw import dtw_distance
 from classic_approach.forced_aligner import pseudo_localize_errors
 from classic_approach.mfcc_extractor import apply_cmvn
 from classic_approach.pipeline import _distance_to_score, analyze
+
+
+TEST_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "test"
+REFERENCE_AUDIO = TEST_DATA_DIR / "pronunciation_en_hello.wav"
+HELLO_PERFECT_AUDIO = TEST_DATA_DIR / "hello_perfect.mp3"
+HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
+HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
+
+
+def _analyze_test_audio(audio_path: Path):
+    return analyze(
+        user_audio_path=str(audio_path),
+        reference_audio_path=str(REFERENCE_AUDIO),
+        transcript="hello",
+    )
 
 
 def test_dtw_distance_identical_features_is_zero() -> None:
@@ -59,47 +74,39 @@ def test_pseudo_localize_errors_marks_end_of_word() -> None:
     assert diagnostics[0]["is_problematic"] is True
 
 
-def test_classic_analyze_happy_path(monkeypatch) -> None:
-    user_audio = SimpleNamespace(samples=np.ones(1600, dtype=np.float32), sample_rate=16000)
-    ref_audio = SimpleNamespace(samples=np.ones(1600, dtype=np.float32), sample_rate=16000)
+def test_classic_analyze_uses_expected_test_data_files() -> None:
+    assert TEST_DATA_DIR.exists()
+    assert REFERENCE_AUDIO.exists()
+    assert HELLO_PERFECT_AUDIO.exists()
+    assert HELLO_NORMAL_AUDIO.exists()
+    assert HELLO_PROBLEM_AUDIO.exists()
 
-    user_mfcc = np.ones((20, 12), dtype=np.float32)
-    ref_mfcc = np.ones((20, 12), dtype=np.float32)
 
-    state = {"call_idx": 0}
+def test_classic_analyze_hello_perfect_is_near_reference() -> None:
+    result = _analyze_test_audio(HELLO_PERFECT_AUDIO)
 
-    def fake_preprocess(_path: str):
-        return user_audio if _path == "user.wav" else ref_audio
-
-    def fake_extract(*_args, **_kwargs):
-        state["call_idx"] += 1
-        return user_mfcc if state["call_idx"] == 1 else ref_mfcc
-
-    monkeypatch.setattr("classic_approach.pipeline.preprocess_audio", fake_preprocess)
-    monkeypatch.setattr("classic_approach.pipeline.extract_mfcc", fake_extract)
-    monkeypatch.setattr("classic_approach.pipeline.dtw_distance", lambda _a, _b: 0.0)
-
-    result = analyze("user.wav", "ref.wav", transcript="hello")
-
-    assert result.dtw_score == 100.0
+    assert result.dtw_score > 90.0
     assert result.verdict == "хорошо"
-    assert result.distance == 0.0
-    assert len(result.error_localization) == 1
-    assert result.error_localization[0]["word"] == "hello"
+    assert result.problematic_phonemes == []
 
 
-def test_classic_analyze_empty_features_returns_zero(monkeypatch) -> None:
-    audio = SimpleNamespace(samples=np.ones(1600, dtype=np.float32), sample_rate=16000)
+def test_classic_analyze_hello_normal_is_mid_quality() -> None:
+    result = _analyze_test_audio(HELLO_NORMAL_AUDIO)
 
-    monkeypatch.setattr("classic_approach.pipeline.preprocess_audio", lambda _p: audio)
-    monkeypatch.setattr(
-        "classic_approach.pipeline.extract_mfcc",
-        lambda *_args, **_kwargs: np.zeros((20, 0), dtype=np.float32),
-    )
+    assert 40.0 <= result.dtw_score < 90.0
+    assert result.verdict == "удовлетворительно"
 
-    result = analyze("user.wav", "ref.wav", transcript="hello")
 
-    assert result.dtw_score == 0.0
+def test_classic_analyze_hello_problem_is_very_low() -> None:
+    result = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
+
+    assert result.dtw_score < 10.0
     assert result.verdict == "неудовлетворительно"
-    assert np.isinf(result.distance)
-    assert result.error_localization == []
+
+
+def test_classic_analyze_real_audio_ordering() -> None:
+    perfect = _analyze_test_audio(HELLO_PERFECT_AUDIO)
+    normal = _analyze_test_audio(HELLO_NORMAL_AUDIO)
+    problem = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
+
+    assert perfect.dtw_score > normal.dtw_score > problem.dtw_score

@@ -98,7 +98,7 @@ if st.button("Запустить MVP", type="primary"):
             "локализация_ошибок": result.error_localization,
         }
 
-        st.markdown("### Красивый результат")
+        st.markdown("### Результат")
         metric_col_1, metric_col_2, metric_col_3 = st.columns(3)
         with metric_col_1:
             st.metric("Оценка произношения", f"{result.dtw_score:.1f} / 100")

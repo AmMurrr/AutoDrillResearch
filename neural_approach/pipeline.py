@@ -49,5 +49,7 @@ def analyze(
 		metric=comparison.metric,
 		model_name=model_name,
 		phoneme_issues=[],
+		user_frames=int(user_embeddings.frame_embeddings.shape[0]),
+		reference_frames=int(reference_embeddings.frame_embeddings.shape[0]),
 	)
  

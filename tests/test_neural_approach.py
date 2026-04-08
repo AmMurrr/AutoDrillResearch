@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -10,6 +11,69 @@ from neural_approach.embedding_comparator import compare_embeddings
 from neural_approach.pipeline import analyze
 from neural_approach.scorer import compute_scoring_result
 from neural_approach.wav2vec_extractor import extract_wav2vec_embeddings
+
+
+TEST_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "test"
+REFERENCE_AUDIO = TEST_DATA_DIR / "pronunciation_en_hello.wav"
+HELLO_PERFECT_AUDIO = TEST_DATA_DIR / "hello_perfect.mp3"
+HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
+HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
+
+
+def _proxy_extract_wav2vec_embeddings(
+    samples,
+    sample_rate,
+    model_name="proxy/wav2vec2",
+    device=None,
+    hf_token=None,
+):
+    _ = (device, hf_token)
+
+    frame_size = max(64, int(0.025 * sample_rate))
+    hop_size = max(32, int(0.010 * sample_rate))
+    window = np.hanning(frame_size).astype(np.float32)
+
+    frames: list[list[float]] = []
+    for start in range(0, max(1, len(samples) - frame_size + 1), hop_size):
+        chunk = np.asarray(samples[start : start + frame_size], dtype=np.float32)
+        if chunk.size < frame_size:
+            chunk = np.pad(chunk, (0, frame_size - chunk.size))
+
+        spectrum = np.abs(np.fft.rfft(chunk * window)).astype(np.float32)
+        band_edges = np.linspace(1, len(spectrum) - 1, num=17, dtype=int)
+
+        band_features: list[float] = []
+        for left, right in zip(band_edges[:-1], band_edges[1:]):
+            band = spectrum[left:right]
+            value = float(np.log1p(np.mean(band))) if band.size else 0.0
+            band_features.append(value)
+
+        frames.append(band_features)
+
+    frame_embeddings = np.asarray(frames, dtype=np.float32)
+    pooled_embedding = np.mean(frame_embeddings, axis=0, dtype=np.float32)
+
+    return SimpleNamespace(
+        frame_embeddings=frame_embeddings,
+        pooled_embedding=pooled_embedding,
+        sample_rate=sample_rate,
+        model_name=model_name,
+        device="cpu",
+    )
+
+
+def _analyze_test_audio(monkeypatch, audio_path: Path):
+    monkeypatch.setattr(
+        "neural_approach.pipeline.extract_wav2vec_embeddings",
+        _proxy_extract_wav2vec_embeddings,
+    )
+    return analyze(
+        user_audio_path=str(audio_path),
+        reference_audio_path=str(REFERENCE_AUDIO),
+        transcript="hello",
+        similarity="cosine",
+        model_name="proxy/wav2vec2",
+    )
 
 
 def test_compare_embeddings_cosine_identical_sequences() -> None:
@@ -45,44 +109,42 @@ def test_compute_scoring_result_verdict_thresholds() -> None:
     assert weak.verdict == "неудовлетворительно"
 
 
-def test_neural_pipeline_analyze_happy_path(monkeypatch) -> None:
-    audio = SimpleNamespace(samples=np.ones(1600, dtype=np.float32), sample_rate=16000)
+def test_neural_analyze_uses_expected_test_data_files() -> None:
+    assert TEST_DATA_DIR.exists()
+    assert REFERENCE_AUDIO.exists()
+    assert HELLO_PERFECT_AUDIO.exists()
+    assert HELLO_NORMAL_AUDIO.exists()
+    assert HELLO_PROBLEM_AUDIO.exists()
 
-    user_frames = np.array(
-        [[1.0, 0.0], [0.8, 0.2], [0.7, 0.3]],
-        dtype=np.float32,
-    )
-    ref_frames = np.array(
-        [[1.0, 0.0], [0.8, 0.2], [0.7, 0.3]],
-        dtype=np.float32,
-    )
 
-    state = {"call_idx": 0}
+def test_neural_analyze_hello_perfect_is_near_reference(monkeypatch) -> None:
+    result = _analyze_test_audio(monkeypatch, HELLO_PERFECT_AUDIO)
 
-    def fake_preprocess(_path: str):
-        return audio
-
-    def fake_extract(_samples, _sr, model_name="facebook/wav2vec2-base", device=None, hf_token=None):
-        _ = (device, hf_token)
-        state["call_idx"] += 1
-        frames = user_frames if state["call_idx"] == 1 else ref_frames
-        pooled = np.mean(frames, axis=0, dtype=np.float32)
-        return SimpleNamespace(
-            frame_embeddings=frames,
-            pooled_embedding=pooled,
-            sample_rate=16000,
-            model_name=model_name,
-            device="cpu",
-        )
-
-    monkeypatch.setattr("neural_approach.pipeline.preprocess_audio", fake_preprocess)
-    monkeypatch.setattr("neural_approach.pipeline.extract_wav2vec_embeddings", fake_extract)
-
-    result = analyze("user.wav", "ref.wav", transcript="hello", similarity="cosine")
-
-    assert result.pronunciation_score > 95.0
+    assert result.pronunciation_score > 90.0
     assert result.verdict == "хорошо"
-    assert result.metric == "cosine"
+    assert result.problematic_phonemes == []
+
+
+def test_neural_analyze_hello_normal_is_mid_quality(monkeypatch) -> None:
+    result = _analyze_test_audio(monkeypatch, HELLO_NORMAL_AUDIO)
+
+    assert 40.0 <= result.pronunciation_score < 90.0
+    assert result.verdict == "удовлетворительно"
+
+
+def test_neural_analyze_hello_problem_is_very_low(monkeypatch) -> None:
+    result = _analyze_test_audio(monkeypatch, HELLO_PROBLEM_AUDIO)
+
+    assert result.pronunciation_score < 10.0
+    assert result.verdict == "неудовлетворительно"
+
+
+def test_neural_analyze_real_audio_ordering(monkeypatch) -> None:
+    perfect = _analyze_test_audio(monkeypatch, HELLO_PERFECT_AUDIO)
+    normal = _analyze_test_audio(monkeypatch, HELLO_NORMAL_AUDIO)
+    problem = _analyze_test_audio(monkeypatch, HELLO_PROBLEM_AUDIO)
+
+    assert perfect.pronunciation_score > normal.pronunciation_score > problem.pronunciation_score
 
 
 def test_extract_wav2vec_embeddings_input_validation() -> None:
