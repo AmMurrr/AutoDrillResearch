@@ -18,6 +18,7 @@ REFERENCE_AUDIO = TEST_DATA_DIR / "pronunciation_en_hello.wav"
 HELLO_PERFECT_AUDIO = TEST_DATA_DIR / "hello_perfect.mp3"
 HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
 HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
+HELLO_WRONG_WORD_AUDIO = TEST_DATA_DIR / "hello_wrong_word.mp3"
 
 
 def _proxy_extract_wav2vec_embeddings(
@@ -115,6 +116,7 @@ def test_neural_analyze_uses_expected_test_data_files() -> None:
     assert HELLO_PERFECT_AUDIO.exists()
     assert HELLO_NORMAL_AUDIO.exists()
     assert HELLO_PROBLEM_AUDIO.exists()
+    assert HELLO_WRONG_WORD_AUDIO.exists()
 
 
 def test_neural_analyze_hello_perfect_is_near_reference(monkeypatch) -> None:
@@ -139,12 +141,21 @@ def test_neural_analyze_hello_problem_is_very_low(monkeypatch) -> None:
     assert result.verdict == "неудовлетворительно"
 
 
+def test_neural_analyze_hello_wrong_word_is_low(monkeypatch) -> None:
+    result = _analyze_test_audio(monkeypatch, HELLO_WRONG_WORD_AUDIO)
+
+    assert result.pronunciation_score < 25.0
+    assert result.verdict == "неудовлетворительно"
+
+
 def test_neural_analyze_real_audio_ordering(monkeypatch) -> None:
     perfect = _analyze_test_audio(monkeypatch, HELLO_PERFECT_AUDIO)
     normal = _analyze_test_audio(monkeypatch, HELLO_NORMAL_AUDIO)
+    wrong_word = _analyze_test_audio(monkeypatch, HELLO_WRONG_WORD_AUDIO)
     problem = _analyze_test_audio(monkeypatch, HELLO_PROBLEM_AUDIO)
 
-    assert perfect.pronunciation_score > normal.pronunciation_score > problem.pronunciation_score
+    assert perfect.pronunciation_score > normal.pronunciation_score > wrong_word.pronunciation_score
+    assert wrong_word.pronunciation_score > problem.pronunciation_score
 
 
 def test_extract_wav2vec_embeddings_input_validation() -> None:
