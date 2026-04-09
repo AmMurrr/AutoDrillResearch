@@ -87,72 +87,79 @@ if st.button("Запустить MVP", type="primary"):
             tmp_path = tmp.name
         resolved_attempt_path = tmp_path
 
-    ref_exists = Path(reference_path).exists()
-    att_exists = Path(resolved_attempt_path).exists()
+    try:
+        ref_exists = Path(reference_path).exists()
+        att_exists = Path(resolved_attempt_path).exists()
 
-    if not ref_exists or not att_exists:
-        st.error("Проверьте пути: эталон и аудио пользователя должны существовать")
-    else:
-        with st.spinner("Загружаю wav2vec2 и считаю эмбеддинги..."):
-            try:
-                result = analyze(
-                    user_audio_path=resolved_attempt_path,
-                    reference_audio_path=reference_path,
-                    transcript=transcript,
-                    similarity=similarity,
-                    model_name=model_name.strip() or DEFAULT_MODEL_NAME,
-                    device=None if device_choice == "auto" else device_choice,
-                    hf_token=hf_token.strip() or None,
-                )
-            except Exception as exc:
-                st.error(f"Ошибка при анализе: {exc}")
-            else:
-                st.success("MVP выполнен")
-                result_payload = {
-                    "reference_exists": ref_exists,
-                    "attempt_exists": att_exists,
-                    "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
-                    "attempt_path_used": resolved_attempt_path,
-                    "transcript": transcript,
-                    "metric": result.metric,
-                    "model_name": result.model_name,
-                    "pronunciation_score": result.pronunciation_score,
-                    "verdict": result.verdict,
-                    "embedding_similarity": result.similarity,
-                    "temporal_distance": result.temporal_distance,
-                    "problematic_phonemes": result.problematic_phonemes,
-                }
-
-                verdict_ru = _verdict_to_russian(result.verdict)
-
-                st.markdown("### Результат")
-                metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
-                with metric_col_1:
-                    st.metric("Оценка произношения", f"{result.pronunciation_score:.1f} / 100")
-                with metric_col_2:
-                    st.metric("Вердикт", verdict_ru)
-                with metric_col_3:
-                    st.metric("Сходство эмбеддингов", f"{result.similarity:.4f}")
-                with metric_col_4:
-                    st.metric("Временная дистанция", f"{result.temporal_distance:.4f}")
-
-                st.progress(int(max(0, min(100, round(result.pronunciation_score)))))
-                _render_verdict_block(result.verdict)
-
-                details_col_1, details_col_2 = st.columns(2)
-                with details_col_1:
-                    st.markdown("**Модель**")
-                    st.info(result.model_name)
-                with details_col_2:
-                    st.markdown("**Метрика**")
-                    st.info(result.metric)
-
-                st.markdown("#### Проблемные зоны")
-                if result.problematic_phonemes:
-                    st.write(", ".join(result.problematic_phonemes))
+        if not ref_exists or not att_exists:
+            st.error("Проверьте пути: эталон и аудио пользователя должны существовать")
+        else:
+            with st.spinner("Загружаю wav2vec2 и считаю эмбеддинги..."):
+                try:
+                    result = analyze(
+                        user_audio_path=resolved_attempt_path,
+                        reference_audio_path=reference_path,
+                        transcript=transcript,
+                        similarity=similarity,
+                        model_name=model_name.strip() or DEFAULT_MODEL_NAME,
+                        device=None if device_choice == "auto" else device_choice,
+                        hf_token=hf_token.strip() or None,
+                    )
+                except Exception as exc:
+                    st.error(f"Ошибка при анализе: {exc}")
                 else:
-                    st.info("Явных проблемных зон не обнаружено.")
+                    st.success("MVP выполнен")
+                    result_payload = {
+                        "reference_exists": ref_exists,
+                        "attempt_exists": att_exists,
+                        "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
+                        "attempt_path_used": resolved_attempt_path,
+                        "transcript": transcript,
+                        "metric": result.metric,
+                        "model_name": result.model_name,
+                        "pronunciation_score": result.pronunciation_score,
+                        "verdict": result.verdict,
+                        "embedding_similarity": result.similarity,
+                        "temporal_distance": result.temporal_distance,
+                        "problematic_phonemes": result.problematic_phonemes,
+                    }
 
-                with st.expander("DEBUG"):
-                    st.write(result_payload)
+                    verdict_ru = _verdict_to_russian(result.verdict)
+
+                    st.markdown("### Результат")
+                    metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+                    with metric_col_1:
+                        st.metric("Оценка произношения", f"{result.pronunciation_score:.1f} / 100")
+                    with metric_col_2:
+                        st.metric("Вердикт", verdict_ru)
+                    with metric_col_3:
+                        st.metric("Сходство эмбеддингов", f"{result.similarity:.4f}")
+                    with metric_col_4:
+                        st.metric("Временная дистанция", f"{result.temporal_distance:.4f}")
+
+                    st.progress(int(max(0, min(100, round(result.pronunciation_score)))))
+                    _render_verdict_block(result.verdict)
+
+                    details_col_1, details_col_2 = st.columns(2)
+                    with details_col_1:
+                        st.markdown("**Модель**")
+                        st.info(result.model_name)
+                    with details_col_2:
+                        st.markdown("**Метрика**")
+                        st.info(result.metric)
+
+                    st.markdown("#### Проблемные зоны")
+                    if result.problematic_phonemes:
+                        st.write(", ".join(result.problematic_phonemes))
+                    else:
+                        st.info("Явных проблемных зон не обнаружено.")
+
+                    with st.expander("DEBUG"):
+                        st.write(result_payload)
+    finally:
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
