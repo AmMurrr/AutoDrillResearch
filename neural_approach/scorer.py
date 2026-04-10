@@ -54,6 +54,16 @@ def _duration_penalty(user_frames: int | None, reference_frames: int | None) -> 
 	return float(np.clip(base_penalty * long_utterance_penalty, 0.0, 1.0))
 
 
+def _issue_penalty(phoneme_issues: list[str] | None) -> float:
+	issues = list(phoneme_issues or [])
+	if not issues:
+		return 1.0
+
+	# Явные локальные аномалии по кадрам считаем сильным признаком ошибки слова.
+	penalty = np.exp(-1.6 * len(set(issues)))
+	return float(np.clip(penalty, 0.1, 1.0))
+
+
 def compute_scoring_result(
 	similarity: float,
 	temporal_distance: float,
@@ -66,11 +76,12 @@ def compute_scoring_result(
 	similarity_quality = _similarity_to_quality(similarity, metric)
 	temporal_quality = _temporal_distance_to_quality(temporal_distance)
 	duration_quality = _duration_penalty(user_frames, reference_frames)
+	issue_penalty = _issue_penalty(phoneme_issues)
 
 	# Основной вклад даёт общее сходство произношения,
 	# но временное выравнивание тоже учитывается.
 	base_score = 100.0 * (0.7 * similarity_quality + 0.3 * temporal_quality)
-	score = base_score * duration_quality
+	score = base_score * duration_quality * issue_penalty
 	score = float(np.clip(score, 0.0, 100.0))
 
 	if score >= 80.0:

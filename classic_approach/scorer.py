@@ -20,6 +20,16 @@ def _distance_to_score(distance: float, user_frames: int, reference_frames: int)
     return float(np.clip(base_score * duration_penalty, 0.0, 100.0))
 
 
+def _issue_penalty(phoneme_issues: list[str] | None) -> float:
+    issues = list(phoneme_issues or [])
+    if not issues:
+        return 1.0
+
+    # Локализационные аномалии по слову считаем сильным признаком нецелевого произношения.
+    penalty = np.exp(-1.6 * len(set(issues)))
+    return float(np.clip(penalty, 0.1, 1.0))
+
+
 
 @dataclass
 class ScoringResult:
@@ -36,7 +46,8 @@ def ComputeScoringResult(
     distance,
     error_localization=None,
 ) -> ScoringResult:
-    score = max(0.0, min(100.0, float(dtw_score)))
+    score = float(dtw_score) * _issue_penalty(phoneme_issues)
+    score = max(0.0, min(100.0, score))
     if score >= 80.0:
         verdict = "хорошо"
     elif score >= 60.0:
