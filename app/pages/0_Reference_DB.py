@@ -7,6 +7,7 @@ from app.reference_db import (
     delete_reference_path,
     init_db,
     list_reference_paths,
+    list_reference_words,
     scan_reference_dir,
 )
 
@@ -30,19 +31,29 @@ with col1:
         st.success(f"Сканирование завершено. Добавлено новых записей: {added_count}")
 
 with col2:
-    st.caption("Если записи уже есть в БД, дубликаты добавлены не будут")
+    st.caption("Дубликаты по паре (word, path) добавлены не будут")
 
 st.divider()
 
 st.markdown("### Добавить путь вручную")
+manual_word = st.text_input("Слово", value="hello")
 manual_path = st.text_input("Путь к эталонному аудио", value="data/reference/example.wav")
 manual_label = st.text_input("Метка (необязательно)", value="")
 
 if st.button("Добавить путь"):
-    if add_reference_path(manual_path, manual_label):
+    if add_reference_path(manual_word, manual_path, manual_label):
         st.success("Путь добавлен в БД")
     else:
-        st.warning("Путь пустой или уже существует")
+        st.warning("Слово/путь пустые или такая пара уже существует")
+
+st.divider()
+
+st.markdown("### Слова в БД")
+word_rows = list_reference_words()
+if word_rows:
+    st.dataframe(word_rows, use_container_width=True, hide_index=True)
+else:
+    st.info("Слова пока не добавлены")
 
 st.divider()
 
@@ -55,7 +66,7 @@ else:
     st.dataframe(records, use_container_width=True)
     delete_choice = st.selectbox(
         "Удалить запись",
-        options=[f"{r['id']} | {r['path']}" for r in records],
+        options=[f"{r['id']} | {r['word']} | {r['path']}" for r in records],
     )
     if st.button("Удалить выбранную запись"):
         reference_id = int(delete_choice.split("|", maxsplit=1)[0].strip())

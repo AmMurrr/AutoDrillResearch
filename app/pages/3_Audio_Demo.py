@@ -17,6 +17,8 @@ def save_to_reference(data: bytes, suffix: str, prefix: str) -> str:
 st.title("Audio Demo")
 st.caption("Демонстрация приема аудиосигнала через Streamlit")
 
+reference_word = st.text_input("Слово для сохранения в БД", value="hello")
+
 st.markdown("### Запись через микрофон")
 # check params
 recorded_audio = st.audio_input("Нажмите и запишите фразу на английском") 
@@ -35,7 +37,7 @@ if recorded_audio is not None:
     )
     if st.button("Сохранить запись в data/reference"):
         rel_path = save_to_reference(recorded_audio.getvalue(), ".wav", "mic")
-        add_reference_path(rel_path, "from_mic")
+        add_reference_path(reference_word, rel_path, "from_mic")
         st.success(f"Сохранено и добавлено в БД: {rel_path}")
 
 st.divider()
@@ -60,6 +62,6 @@ if uploaded is not None:
     if st.button("Сохранить файл в data/reference"):
         ext = Path(uploaded.name).suffix.lower() or ".wav"
         rel_path = save_to_reference(uploaded.getvalue(), ext, "upload")
-        add_reference_path(rel_path, "from_upload")
+        add_reference_path(reference_word, rel_path, "from_upload")
         st.success(f"Сохранено и добавлено в БД: {rel_path}")
 

@@ -158,6 +158,31 @@ def test_neural_analyze_real_audio_ordering(monkeypatch) -> None:
     assert wrong_word.pronunciation_score > problem.pronunciation_score
 
 
+def test_neural_analyze_multiple_references_aggregates_results(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "neural_approach.pipeline.extract_wav2vec_embeddings",
+        _proxy_extract_wav2vec_embeddings,
+    )
+
+    single = analyze(
+        user_audio_path=str(HELLO_NORMAL_AUDIO),
+        reference_audio_path=str(REFERENCE_AUDIO),
+        transcript="hello",
+        similarity="cosine",
+        model_name="proxy/wav2vec2",
+    )
+    multi = analyze(
+        user_audio_path=str(HELLO_NORMAL_AUDIO),
+        reference_audio_path=[str(REFERENCE_AUDIO), str(REFERENCE_AUDIO)],
+        transcript="hello",
+        similarity="cosine",
+        model_name="proxy/wav2vec2",
+    )
+
+    assert np.isclose(multi.pronunciation_score, single.pronunciation_score, atol=1e-6)
+    assert multi.verdict == single.verdict
+
+
 def test_extract_wav2vec_embeddings_input_validation() -> None:
     with pytest.raises(ValueError):
         extract_wav2vec_embeddings(np.ones(100, dtype=np.float32), sample_rate=8000)

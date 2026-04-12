@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import List
 
@@ -15,6 +16,35 @@ class ScoringResult:
 	verdict: str
 	metric: str
 	model_name: str
+
+
+def _verdict_from_score(score: float) -> str:
+	if score >= 80.0:
+		return "хорошо"
+	if score >= 60.0:
+		return "удовлетворительно"
+	return "неудовлетворительно"
+
+
+def _build_scoring_result(
+	pronunciation_score: float,
+	similarity: float,
+	temporal_distance: float,
+	phoneme_issues: list[str] | None,
+	metric: str,
+	model_name: str,
+) -> ScoringResult:
+	clipped_score = float(np.clip(float(pronunciation_score), 0.0, 100.0))
+	metric_key = metric.strip().lower()
+	return ScoringResult(
+		pronunciation_score=clipped_score,
+		similarity=float(similarity),
+		temporal_distance=float(temporal_distance),
+		problematic_phonemes=list(phoneme_issues or []),
+		verdict=_verdict_from_score(clipped_score),
+		metric=metric_key,
+		model_name=model_name,
+	)
 
 
 def _similarity_to_quality(similarity: float, metric: str) -> float:
@@ -84,19 +114,49 @@ def compute_scoring_result(
 	score = base_score * duration_quality * issue_penalty
 	score = float(np.clip(score, 0.0, 100.0))
 
-	if score >= 80.0:
-		verdict = "хорошо"
-	elif score >= 60.0:
-		verdict = "удовлетворительно"
-	else:
-		verdict = "неудовлетворительно"
-
-	return ScoringResult(
+	return _build_scoring_result(
 		pronunciation_score=score,
 		similarity=float(similarity),
 		temporal_distance=float(temporal_distance),
-		problematic_phonemes=list(phoneme_issues or []),
-		verdict=verdict,
-		metric=metric.strip().lower(),
+		phoneme_issues=phoneme_issues,
+		metric=metric,
 		model_name=model_name,
+	)
+
+
+def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
+	if not results:
+		return _build_scoring_result(
+			pronunciation_score=0.0,
+			similarity=0.0,
+			temporal_distance=float("inf"),
+			phoneme_issues=[],
+			metric="cosine",
+			model_name="unknown",
+		)
+
+	aggregated_score = float(np.mean([result.pronunciation_score for result in results]))
+	aggregated_similarity = float(np.mean([result.similarity for result in results]))
+
+	finite_distances = [result.temporal_distance for result in results if np.isfinite(result.temporal_distance)]
+	aggregated_temporal_distance = (
+		float(np.mean(finite_distances)) if finite_distances else float("inf")
+	)
+
+	issue_counter: Counter[str] = Counter(
+		issue for result in results for issue in result.problematic_phonemes
+	)
+	majority_threshold = (len(results) // 2) + 1
+	aggregated_issues = sorted(
+		issue for issue, count in issue_counter.items() if count >= majority_threshold
+	)
+
+	first_result = results[0]
+	return _build_scoring_result(
+		pronunciation_score=aggregated_score,
+		similarity=aggregated_similarity,
+		temporal_distance=aggregated_temporal_distance,
+		phoneme_issues=aggregated_issues,
+		metric=first_result.metric,
+		model_name=first_result.model_name,
 	)

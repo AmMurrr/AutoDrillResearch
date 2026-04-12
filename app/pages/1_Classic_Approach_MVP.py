@@ -22,15 +22,37 @@ init_db()
 
 
 st.markdown("### Входные данные")
-references = list_reference_paths()
-reference_options = ["data/reference/sample_reference.wav"] + [r["path"] for r in references]
+transcript = st.text_input("Ожидаемый текст фразы", value="Hello")
 
-selected_reference = st.selectbox(
-    "Эталон из SQLite",
-    options=reference_options,
+default_word = transcript.strip().lower()
+reference_word = st.text_input("Слово для поиска эталонов в SQLite", value=default_word)
+
+references = list_reference_paths(word=reference_word.strip())
+if references:
+    st.caption(f"Найдено эталонов по слову '{reference_word.strip()}': {len(references)}")
+    st.dataframe(
+        [{"word": row["word"], "path": row["path"], "created_at": row["created_at"]} for row in references],
+        use_container_width=True,
+        hide_index=True,
+    )
+    if len(references) == 1:
+        references_to_use = 1
+        st.caption("Доступен один эталон: он будет использован автоматически.")
+    else:
+        references_to_use = st.slider(
+            "Сколько эталонов использовать в алгоритме",
+            min_value=1,
+            max_value=len(references),
+            value=min(3, len(references)),
+        )
+else:
+    st.info("По этому слову эталоны в БД не найдены")
+    references_to_use = 0
+
+manual_reference = st.text_input(
+    "Или укажите путь вручную (используется только один эталон)",
+    value="",
 )
-manual_reference = st.text_input("Или укажите путь вручную (приоритет)", value="")
-reference_path = manual_reference.strip() or selected_reference
 
 attempt_path = st.text_input(
     "Путь к аудио пользователя",
@@ -44,8 +66,6 @@ uploaded_attempt = st.file_uploader(
     key="classic_uploaded_attempt",
 )
 recorded_attempt = st.audio_input("Или запишите попытку через микрофон", key="classic_recorded_attempt")
-
-transcript = st.text_input("Ожидаемый текст фразы", value="Hello")
 
 st.markdown("### Параметры")
 col1, col2, col3 = st.columns(3)
@@ -68,16 +88,28 @@ if st.button("Запустить MVP", type="primary"):
             tmp_path = tmp.name
         resolved_attempt_path = tmp_path
 
+    manual_reference_path = manual_reference.strip()
+    if manual_reference_path:
+        selected_reference_paths = [manual_reference_path]
+        reference_mode = "manual_single"
+    else:
+        selected_reference_paths = [row["path"] for row in references[:references_to_use]]
+        reference_mode = "sqlite_by_word"
+
     try:
-        ref_exists = Path(reference_path).exists()
+        missing_references = [path for path in selected_reference_paths if not Path(path).exists()]
         att_exists = Path(resolved_attempt_path).exists()
 
-        if not ref_exists or not att_exists:
-            st.error("Проверьте пути: эталон и аудио пользователя должны существовать")
+        if not selected_reference_paths:
+            st.error("Не удалось выбрать эталоны: укажите путь вручную или найдите эталоны по слову")
+        elif missing_references or not att_exists:
+            st.error("Проверьте пути: выбранные эталоны и аудио пользователя должны существовать")
+            if missing_references:
+                st.write({"отсутствующие_эталоны": missing_references})
         else:
             result = analyze(
                 user_audio_path=resolved_attempt_path,
-                reference_audio_path=reference_path,
+                reference_audio_path=selected_reference_paths,
                 transcript=transcript,
                 n_mfcc=n_mfcc,
                 frame_ms=frame_ms,
@@ -85,7 +117,10 @@ if st.button("Запустить MVP", type="primary"):
             )
             st.success("MVP выполнен")
             result_payload = {
-                "эталон_найден": ref_exists,
+                "режим_выбора_эталонов": reference_mode,
+                "слово_поиска": reference_word.strip(),
+                "использованные_эталоны": selected_reference_paths,
+                "количество_эталонов": len(selected_reference_paths),
                 "попытка_найдена": att_exists,
                 "режим_ввода": "аудио_из_streamlit" if audio_source is not None else "путь_вручную",
                 "использованный_путь_попытки": resolved_attempt_path,

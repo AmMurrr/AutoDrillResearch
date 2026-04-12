@@ -121,3 +121,19 @@ def test_classic_analyze_real_audio_ordering() -> None:
 
     assert perfect.dtw_score > normal.dtw_score > wrong_word.dtw_score
     assert wrong_word.dtw_score > problem.dtw_score
+
+
+def test_classic_analyze_multiple_references_aggregates_results() -> None:
+    single = analyze(
+        user_audio_path=str(HELLO_NORMAL_AUDIO),
+        reference_audio_path=str(REFERENCE_AUDIO),
+        transcript="hello",
+    )
+    multi = analyze(
+        user_audio_path=str(HELLO_NORMAL_AUDIO),
+        reference_audio_path=[str(REFERENCE_AUDIO), str(REFERENCE_AUDIO)],
+        transcript="hello",
+    )
+
+    assert np.isclose(multi.dtw_score, single.dtw_score, atol=1e-6)
+    assert multi.verdict == single.verdict
