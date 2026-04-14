@@ -13,3 +13,5 @@ next.md
 data/reference_paths.sqlite3
 upd.md
 app/__pycache__/reference_db.cpython-312.pyc
+score.md
+mfa.md

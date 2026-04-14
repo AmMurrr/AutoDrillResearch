@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from .embedding_comparator import compare_embeddings
+from .input_gate import validate_speech_signal
 from .preprocessing import preprocess_audio
 from .scorer import ScoringResult, aggregate_scoring_results, compute_scoring_result
 from .wav2vec_extractor import DEFAULT_MODEL_NAME, extract_wav2vec_embeddings
@@ -133,6 +134,21 @@ def analyze(
 	_ = transcript
 
 	user_audio = preprocess_audio(user_audio_path)
+	speech_gate = validate_speech_signal(
+		user_audio.samples,
+		sample_rate=user_audio.sample_rate,
+	)
+	if not speech_gate.passed:
+		return compute_scoring_result(
+			similarity=0.0,
+			temporal_distance=float("inf"),
+			metric=similarity,
+			model_name=model_name,
+			phoneme_issues=["word:unrecognized"],
+			status="empty_audio",
+			reason="insufficient_speech",
+		)
+
 	reference_paths = _resolve_reference_paths(reference_audio_path)
 	if not reference_paths:
 		return compute_scoring_result(

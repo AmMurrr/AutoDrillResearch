@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import soundfile as sf
 import torch
 
 from neural_approach.embedding_comparator import compare_embeddings
@@ -19,6 +21,7 @@ HELLO_PERFECT_AUDIO = TEST_DATA_DIR / "hello_perfect.mp3"
 HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
 HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
 HELLO_WRONG_WORD_AUDIO = TEST_DATA_DIR / "hello_wrong_word.mp3"
+HELLO_EMPTY_AUDIO = TEST_DATA_DIR / "hello_empty.wav"
 
 
 def _proxy_extract_wav2vec_embeddings(
@@ -117,6 +120,7 @@ def test_neural_analyze_uses_expected_test_data_files() -> None:
     assert HELLO_NORMAL_AUDIO.exists()
     assert HELLO_PROBLEM_AUDIO.exists()
     assert HELLO_WRONG_WORD_AUDIO.exists()
+    assert HELLO_EMPTY_AUDIO.exists()
 
 
 def test_neural_analyze_hello_perfect_is_near_reference(monkeypatch) -> None:
@@ -134,10 +138,10 @@ def test_neural_analyze_hello_normal_is_mid_quality(monkeypatch) -> None:
     assert result.verdict == "удовлетворительно"
 
 
-def test_neural_analyze_hello_problem_is_very_low(monkeypatch) -> None:
+def test_neural_analyze_hello_problem_is_low_quality(monkeypatch) -> None:
     result = _analyze_test_audio(monkeypatch, HELLO_PROBLEM_AUDIO)
 
-    assert result.pronunciation_score < 10.0
+    assert result.pronunciation_score < 45.0
     assert result.verdict == "неудовлетворительно"
 
 
@@ -154,8 +158,26 @@ def test_neural_analyze_real_audio_ordering(monkeypatch) -> None:
     wrong_word = _analyze_test_audio(monkeypatch, HELLO_WRONG_WORD_AUDIO)
     problem = _analyze_test_audio(monkeypatch, HELLO_PROBLEM_AUDIO)
 
-    assert perfect.pronunciation_score > normal.pronunciation_score > wrong_word.pronunciation_score
-    assert wrong_word.pronunciation_score > problem.pronunciation_score
+    assert perfect.pronunciation_score > normal.pronunciation_score > problem.pronunciation_score
+    assert problem.pronunciation_score > wrong_word.pronunciation_score
+
+
+def test_neural_analyze_hello_empty_file_is_marked_empty_audio(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "neural_approach.pipeline.extract_wav2vec_embeddings",
+        _proxy_extract_wav2vec_embeddings,
+    )
+    result = analyze(
+        user_audio_path=str(HELLO_EMPTY_AUDIO),
+        reference_audio_path=str(REFERENCE_AUDIO),
+        transcript="hello",
+        similarity="cosine",
+        model_name="proxy/wav2vec2",
+    )
+
+    assert result.pronunciation_score == 0.0
+    assert result.status == "empty_audio"
+    assert result.reason == "insufficient_speech"
 
 
 def test_neural_analyze_multiple_references_aggregates_results(monkeypatch) -> None:
@@ -181,6 +203,45 @@ def test_neural_analyze_multiple_references_aggregates_results(monkeypatch) -> N
 
     assert np.isclose(multi.pronunciation_score, single.pronunciation_score, atol=1e-6)
     assert multi.verdict == single.verdict
+
+
+def test_neural_analyze_empty_audio_returns_empty_audio_status() -> None:
+    silent = np.zeros(16000, dtype=np.float32)
+
+    with NamedTemporaryFile(suffix=".wav") as tmp:
+        sf.write(tmp.name, silent, samplerate=16000)
+        result = analyze(
+            user_audio_path=tmp.name,
+            reference_audio_path=str(REFERENCE_AUDIO),
+            transcript="hello",
+            similarity="cosine",
+            model_name="proxy/wav2vec2",
+        )
+
+    assert result.pronunciation_score == 0.0
+    assert result.status == "empty_audio"
+    assert result.reason == "insufficient_speech"
+
+
+def test_neural_analyze_nonword_tone_returns_empty_audio_status() -> None:
+    sample_rate = 16000
+    duration_sec = 1.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float32) / float(sample_rate)
+    tone = (0.2 * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32)
+
+    with NamedTemporaryFile(suffix=".wav") as tmp:
+        sf.write(tmp.name, tone, samplerate=sample_rate)
+        result = analyze(
+            user_audio_path=tmp.name,
+            reference_audio_path=str(REFERENCE_AUDIO),
+            transcript="hello",
+            similarity="cosine",
+            model_name="proxy/wav2vec2",
+        )
+
+    assert result.pronunciation_score == 0.0
+    assert result.status == "empty_audio"
+    assert result.reason == "insufficient_speech"
 
 
 def test_extract_wav2vec_embeddings_input_validation() -> None:

@@ -4,6 +4,7 @@ import numpy as np
 
 from .dtw import dtw_distance
 from .forced_aligner import pseudo_localize_errors
+from .input_gate import validate_speech_signal
 from .mfcc_extractor import extract_mfcc
 from .preprocessing import preprocess_audio
 from .scorer import (
@@ -83,6 +84,20 @@ def analyze(
 ) -> ScoringResult:
     # препроцессинг
     user_audio = preprocess_audio(user_audio_path)
+    speech_gate = validate_speech_signal(
+        user_audio.samples,
+        sample_rate=user_audio.sample_rate,
+    )
+    if not speech_gate.passed:
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            phoneme_issues=["word:unrecognized"],
+            distance=float("inf"),
+            error_localization=[],
+            status="empty_audio",
+            reason="insufficient_speech",
+        )
+
     reference_paths = _resolve_reference_paths(reference_audio_path)
 
     if not reference_paths:

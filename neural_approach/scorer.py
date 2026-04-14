@@ -16,6 +16,8 @@ class ScoringResult:
 	verdict: str
 	metric: str
 	model_name: str
+	status: str = "ok"
+	reason: str = ""
 
 
 def _verdict_from_score(score: float) -> str:
@@ -33,6 +35,8 @@ def _build_scoring_result(
 	phoneme_issues: list[str] | None,
 	metric: str,
 	model_name: str,
+	status: str = "ok",
+	reason: str = "",
 ) -> ScoringResult:
 	clipped_score = float(np.clip(float(pronunciation_score), 0.0, 100.0))
 	metric_key = metric.strip().lower()
@@ -44,6 +48,8 @@ def _build_scoring_result(
 		verdict=_verdict_from_score(clipped_score),
 		metric=metric_key,
 		model_name=model_name,
+		status=status,
+		reason=reason,
 	)
 
 
@@ -102,7 +108,21 @@ def compute_scoring_result(
 	phoneme_issues: list[str] | None = None,
 	user_frames: int | None = None,
 	reference_frames: int | None = None,
+	status: str = "ok",
+	reason: str = "",
 ) -> ScoringResult:
+	if status != "ok":
+		return _build_scoring_result(
+			pronunciation_score=0.0,
+			similarity=float(similarity),
+			temporal_distance=float(temporal_distance),
+			phoneme_issues=phoneme_issues,
+			metric=metric,
+			model_name=model_name,
+			status=status,
+			reason=reason,
+		)
+
 	similarity_quality = _similarity_to_quality(similarity, metric)
 	temporal_quality = _temporal_distance_to_quality(temporal_distance)
 	duration_quality = _duration_penalty(user_frames, reference_frames)
@@ -121,6 +141,8 @@ def compute_scoring_result(
 		phoneme_issues=phoneme_issues,
 		metric=metric,
 		model_name=model_name,
+		status=status,
+		reason=reason,
 	)
 
 

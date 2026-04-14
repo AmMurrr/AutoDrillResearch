@@ -154,6 +154,8 @@ if st.button("Запустить MVP", type="primary"):
                         "model_name": result.model_name,
                         "pronunciation_score": result.pronunciation_score,
                         "verdict": result.verdict,
+                        "status": result.status,
+                        "reason": result.reason,
                         "embedding_similarity": result.similarity,
                         "temporal_distance": result.temporal_distance,
                         "problematic_phonemes": result.problematic_phonemes,
@@ -173,7 +175,13 @@ if st.button("Запустить MVP", type="primary"):
                         st.metric("Временная дистанция", f"{result.temporal_distance:.4f}")
 
                     st.progress(int(max(0, min(100, round(result.pronunciation_score)))))
-                    _render_verdict_block(result.verdict)
+                    if result.status == "empty_audio":
+                        st.error(
+                            "Нераспознанное слово: в записи недостаточно речевого сигнала "
+                            "(пусто, слишком тихо или обрыв). Повторите попытку."
+                        )
+                    else:
+                        _render_verdict_block(result.verdict)
 
                     details_col_1, details_col_2 = st.columns(2)
                     with details_col_1:

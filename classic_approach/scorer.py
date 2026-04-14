@@ -44,6 +44,8 @@ def _build_scoring_result(
     phoneme_issues: list[str] | None,
     distance: float,
     error_localization: list[dict[str, Any]] | None,
+    status: str = "ok",
+    reason: str = "",
 ) -> "ScoringResult":
     clipped_score = float(np.clip(float(score), 0.0, 100.0))
     return ScoringResult(
@@ -52,6 +54,8 @@ def _build_scoring_result(
         verdict=_verdict_from_score(clipped_score),
         distance=float(distance),
         error_localization=list(error_localization or []),
+        status=status,
+        reason=reason,
     )
 
 
@@ -63,6 +67,8 @@ class ScoringResult:
     verdict: str
     distance: float
     error_localization: List[dict[str, Any]]
+    status: str = "ok"
+    reason: str = ""
 
 
 def ComputeScoringResult(
@@ -70,6 +76,8 @@ def ComputeScoringResult(
     phoneme_issues,
     distance,
     error_localization=None,
+    status: str = "ok",
+    reason: str = "",
 ) -> ScoringResult:
     score = float(dtw_score) * _issue_penalty(phoneme_issues)
     return _build_scoring_result(
@@ -77,6 +85,8 @@ def ComputeScoringResult(
         phoneme_issues=phoneme_issues,
         distance=distance,
         error_localization=list(error_localization or []),
+        status=status,
+        reason=reason,
     )
 
 
@@ -86,6 +96,8 @@ def compute_scoring_result_from_distance(
     reference_frames: int,
     phoneme_issues: list[str] | None = None,
     error_localization: list[dict[str, Any]] | None = None,
+    status: str = "ok",
+    reason: str = "",
 ) -> ScoringResult:
     if not np.isfinite(distance):
         return ComputeScoringResult(
@@ -93,6 +105,8 @@ def compute_scoring_result_from_distance(
             phoneme_issues=phoneme_issues,
             distance=float("inf"),
             error_localization=error_localization,
+            status=status,
+            reason=reason,
         )
 
     dtw_score = _distance_to_score(float(distance), int(user_frames), int(reference_frames))
@@ -101,6 +115,8 @@ def compute_scoring_result_from_distance(
         phoneme_issues=phoneme_issues,
         distance=float(distance),
         error_localization=error_localization,
+        status=status,
+        reason=reason,
     )
 
 

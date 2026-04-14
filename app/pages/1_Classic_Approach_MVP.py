@@ -129,6 +129,8 @@ if st.button("Запустить MVP", type="primary"):
                 "hop_ms": hop_ms,
                 "оценка_произношения": result.dtw_score,
                 "вердикт": result.verdict,
+                "status": result.status,
+                "reason": result.reason,
                 "проблемные_зоны": result.problematic_phonemes,
                 "dtw_дистанция": result.distance,
                 "локализация_ошибок": result.error_localization,
@@ -145,7 +147,13 @@ if st.button("Запустить MVP", type="primary"):
                 st.metric("DTW дистанция", distance_text)
 
             st.progress(int(max(0, min(100, round(result.dtw_score)))))
-            _render_verdict_block(result.verdict)
+            if result.status == "empty_audio":
+                st.error(
+                    "Нераспознанное слово: в записи недостаточно речевого сигнала "
+                    "(пусто, слишком тихо или обрыв). Повторите попытку."
+                )
+            else:
+                _render_verdict_block(result.verdict)
 
             st.markdown("#### Локализация ошибок")
             if result.error_localization:

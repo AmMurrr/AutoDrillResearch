@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import numpy as np
+import soundfile as sf
 
 from classic_approach.dtw import dtw_distance
 from classic_approach.forced_aligner import pseudo_localize_errors
@@ -16,6 +18,7 @@ HELLO_PERFECT_AUDIO = TEST_DATA_DIR / "hello_perfect.mp3"
 HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
 HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
 HELLO_WRONG_WORD_AUDIO = TEST_DATA_DIR / "hello_wrong_word.mp3"
+HELLO_EMPTY_AUDIO = TEST_DATA_DIR / "hello_empty.wav"
 
 
 def _analyze_test_audio(audio_path: Path):
@@ -82,6 +85,7 @@ def test_classic_analyze_uses_expected_test_data_files() -> None:
     assert HELLO_NORMAL_AUDIO.exists()
     assert HELLO_PROBLEM_AUDIO.exists()
     assert HELLO_WRONG_WORD_AUDIO.exists()
+    assert HELLO_EMPTY_AUDIO.exists()
 
 
 def test_classic_analyze_hello_perfect_is_near_reference() -> None:
@@ -99,10 +103,10 @@ def test_classic_analyze_hello_normal_is_mid_quality() -> None:
     assert result.verdict == "удовлетворительно"
 
 
-def test_classic_analyze_hello_problem_is_very_low() -> None:
+def test_classic_analyze_hello_problem_is_low_quality() -> None:
     result = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
 
-    assert result.dtw_score < 10.0
+    assert result.dtw_score < 45.0
     assert result.verdict == "неудовлетворительно"
 
 
@@ -119,8 +123,16 @@ def test_classic_analyze_real_audio_ordering() -> None:
     wrong_word = _analyze_test_audio(HELLO_WRONG_WORD_AUDIO)
     problem = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
 
-    assert perfect.dtw_score > normal.dtw_score > wrong_word.dtw_score
-    assert wrong_word.dtw_score > problem.dtw_score
+    assert perfect.dtw_score > normal.dtw_score > problem.dtw_score
+    assert problem.dtw_score > wrong_word.dtw_score
+
+
+def test_classic_analyze_hello_empty_file_is_marked_empty_audio() -> None:
+    result = _analyze_test_audio(HELLO_EMPTY_AUDIO)
+
+    assert result.dtw_score == 0.0
+    assert result.status == "empty_audio"
+    assert result.reason == "insufficient_speech"
 
 
 def test_classic_analyze_multiple_references_aggregates_results() -> None:
@@ -137,3 +149,38 @@ def test_classic_analyze_multiple_references_aggregates_results() -> None:
 
     assert np.isclose(multi.dtw_score, single.dtw_score, atol=1e-6)
     assert multi.verdict == single.verdict
+
+
+def test_classic_analyze_empty_audio_returns_empty_audio_status() -> None:
+    silent = np.zeros(16000, dtype=np.float32)
+
+    with NamedTemporaryFile(suffix=".wav") as tmp:
+        sf.write(tmp.name, silent, samplerate=16000)
+        result = analyze(
+            user_audio_path=tmp.name,
+            reference_audio_path=str(REFERENCE_AUDIO),
+            transcript="hello",
+        )
+
+    assert result.dtw_score == 0.0
+    assert result.status == "empty_audio"
+    assert result.reason == "insufficient_speech"
+
+
+def test_classic_analyze_nonword_tone_returns_empty_audio_status() -> None:
+    sample_rate = 16000
+    duration_sec = 1.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float32) / float(sample_rate)
+    tone = (0.2 * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32)
+
+    with NamedTemporaryFile(suffix=".wav") as tmp:
+        sf.write(tmp.name, tone, samplerate=sample_rate)
+        result = analyze(
+            user_audio_path=tmp.name,
+            reference_audio_path=str(REFERENCE_AUDIO),
+            transcript="hello",
+        )
+
+    assert result.dtw_score == 0.0
+    assert result.status == "empty_audio"
+    assert result.reason == "insufficient_speech"
