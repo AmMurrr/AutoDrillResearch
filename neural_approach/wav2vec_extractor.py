@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -10,6 +11,7 @@ from transformers import AutoFeatureExtractor, AutoModel
 
 
 DEFAULT_MODEL_NAME = "facebook/wav2vec2-base"
+HF_TOKEN_ENV_VAR = "HF_TOKEN"
 
 
 @dataclass
@@ -33,13 +35,68 @@ def _resolve_device(device: str | None = None) -> torch.device:
 	return torch.device("cpu")
 
 
-def _resolve_hf_token(hf_token: str | None = None) -> str | None:
+def _read_dotenv_value(dotenv_path: Path, key: str) -> str | None:
+	try:
+		content = dotenv_path.read_text(encoding="utf-8")
+	except OSError:
+		return None
+
+	for raw_line in content.splitlines():
+		line = raw_line.strip()
+		if not line or line.startswith("#"):
+			continue
+
+		if line.startswith("export "):
+			line = line[len("export ") :].strip()
+
+		if "=" not in line:
+			continue
+
+		lhs, rhs = line.split("=", 1)
+		if lhs.strip() != key:
+			continue
+
+		value = rhs.strip()
+		if value and value[0] in {'"', "'"} and value[-1] == value[0]:
+			value = value[1:-1]
+
+		value = value.strip()
+		return value or None
+
+	return None
+
+
+def _resolve_hf_token_from_dotenv() -> str | None:
+	candidates = [
+		Path.cwd() / ".env",
+		Path(__file__).resolve().parents[1] / ".env",
+	]
+
+	seen: set[str] = set()
+	for candidate in candidates:
+		candidate_key = str(candidate)
+		if candidate_key in seen:
+			continue
+		seen.add(candidate_key)
+
+		token = _read_dotenv_value(candidate, HF_TOKEN_ENV_VAR)
+		if token:
+			return token
+
+	return None
+
+
+def resolve_hf_token(hf_token: str | None = None) -> str | None:
 	if hf_token is not None and hf_token.strip():
 		return hf_token.strip()
 
-	env_token = os.getenv("HF_TOKEN", "").strip()
+	env_token = os.getenv(HF_TOKEN_ENV_VAR, "").strip()
 	if env_token:
 		return env_token
+
+	dotenv_token = _resolve_hf_token_from_dotenv()
+	if dotenv_token:
+		return dotenv_token
 	return None
 
 
@@ -70,7 +127,7 @@ def extract_wav2vec_embeddings(
 
 	speech = np.clip(speech, -1.0, 1.0)
 	resolved_device = _resolve_device(device)
-	resolved_token = _resolve_hf_token(hf_token)
+	resolved_token = resolve_hf_token(hf_token)
 	feature_extractor, model = _load_model_bundle(model_name, resolved_device.type, resolved_token)
 
 	inputs = feature_extractor(

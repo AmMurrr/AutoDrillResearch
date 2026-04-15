@@ -3,7 +3,7 @@ from tempfile import NamedTemporaryFile
 
 import streamlit as st
 from neural_approach.pipeline import analyze
-from neural_approach.wav2vec_extractor import DEFAULT_MODEL_NAME
+from neural_approach.wav2vec_extractor import DEFAULT_MODEL_NAME, HF_TOKEN_ENV_VAR, resolve_hf_token
 from app.reference_db import init_db, list_reference_paths
 
 
@@ -92,7 +92,10 @@ with col3:
 hf_token = st.text_input(
     "HF_TOKEN (опционально)",
     value="",
-    help="Если поле пустое, будет использована переменная окружения HF_TOKEN (если задана).",
+    help=(
+        "Если поле пустое, токен будет взят из переменной окружения "
+        f"{HF_TOKEN_ENV_VAR}"
+    ),
 )
 
 if st.button("Запустить MVP", type="primary"):
@@ -128,6 +131,7 @@ if st.button("Запустить MVP", type="primary"):
         else:
             with st.spinner("Загружаю wav2vec2 и считаю эмбеддинги..."):
                 try:
+                    resolved_hf_token = resolve_hf_token(hf_token.strip() or None)
                     result = analyze(
                         user_audio_path=resolved_attempt_path,
                         reference_audio_path=selected_reference_paths,
@@ -135,7 +139,7 @@ if st.button("Запустить MVP", type="primary"):
                         similarity=similarity,
                         model_name=model_name.strip() or DEFAULT_MODEL_NAME,
                         device=None if device_choice == "auto" else device_choice,
-                        hf_token=hf_token.strip() or None,
+                        hf_token=resolved_hf_token,
                     )
                 except Exception as exc:
                     st.error(f"Ошибка при анализе: {exc}")
