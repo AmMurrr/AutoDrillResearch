@@ -68,13 +68,22 @@ uploaded_attempt = st.file_uploader(
 recorded_attempt = st.audio_input("Или запишите попытку через микрофон", key="classic_recorded_attempt")
 
 st.markdown("### Параметры")
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     n_mfcc = st.slider("MFCC коэффициенты", min_value=13, max_value=40, value=20)
 with col2:
     frame_ms = st.slider("Длина окна (ms)", min_value=10, max_value=50, value=25)
 with col3:
     hop_ms = st.slider("Шаг окна (ms)", min_value=5, max_value=20, value=10)
+with col4:
+    sakoe_chiba_radius = st.number_input(
+        "Sakoe-Chiba band",
+        min_value=0,
+        max_value=100,
+        value=12,
+        step=1,
+        help="0 отключает ограничение окна DTW.",
+    )
 
 if st.button("Запустить MVP", type="primary"):
     audio_source = recorded_attempt if recorded_attempt is not None else uploaded_attempt
@@ -114,6 +123,7 @@ if st.button("Запустить MVP", type="primary"):
                 n_mfcc=n_mfcc,
                 frame_ms=frame_ms,
                 hop_ms=hop_ms,
+                sakoe_chiba_radius=int(sakoe_chiba_radius),
             )
             st.success("MVP выполнен")
             result_payload = {
@@ -127,6 +137,7 @@ if st.button("Запустить MVP", type="primary"):
                 "n_mfcc": n_mfcc,
                 "frame_ms": frame_ms,
                 "hop_ms": hop_ms,
+                "sakoe_chiba_radius": int(sakoe_chiba_radius),
                 "оценка_произношения": result.dtw_score,
                 "вердикт": result.verdict,
                 "status": result.status,

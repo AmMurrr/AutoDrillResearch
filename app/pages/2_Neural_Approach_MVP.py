@@ -83,11 +83,18 @@ st.markdown("### Параметры")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    similarity = st.selectbox("Similarity", options=["cosine", "euclidean"])
-with col2:
     model_name = st.text_input("HF модель", value=DEFAULT_MODEL_NAME)
-with col3:
+with col2:
     device_choice = st.selectbox("Device", options=["auto", "cpu", "cuda"])
+with col3:
+    sakoe_chiba_radius = st.number_input(
+        "Sakoe-Chiba band",
+        min_value=0,
+        max_value=100,
+        value=12,
+        step=1,
+        help="0 отключает ограничение окна temporal DTW.",
+    )
 
 hf_token = st.text_input(
     "HF_TOKEN (опционально)",
@@ -136,10 +143,11 @@ if st.button("Запустить MVP", type="primary"):
                         user_audio_path=resolved_attempt_path,
                         reference_audio_path=selected_reference_paths,
                         transcript=transcript,
-                        similarity=similarity,
+                        similarity="cosine",
                         model_name=model_name.strip() or DEFAULT_MODEL_NAME,
                         device=None if device_choice == "auto" else device_choice,
                         hf_token=resolved_hf_token,
+                        sakoe_chiba_radius=int(sakoe_chiba_radius),
                     )
                 except Exception as exc:
                     st.error(f"Ошибка при анализе: {exc}")
@@ -154,6 +162,7 @@ if st.button("Запустить MVP", type="primary"):
                         "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
                         "attempt_path_used": resolved_attempt_path,
                         "transcript": transcript,
+                        "sakoe_chiba_radius": int(sakoe_chiba_radius),
                         "metric": result.metric,
                         "model_name": result.model_name,
                         "pronunciation_score": result.pronunciation_score,

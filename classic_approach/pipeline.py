@@ -36,6 +36,7 @@ def _analyze_against_single_reference(
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
+    sakoe_chiba_radius: int | None,
 ) -> ScoringResult:
     reference_audio = preprocess_audio(reference_audio_path)
     reference_mfcc = extract_mfcc(
@@ -49,7 +50,11 @@ def _analyze_against_single_reference(
     if user_mfcc.shape[1] == 0 or reference_mfcc.shape[1] == 0:
         return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
 
-    distance = dtw_distance(user_mfcc, reference_mfcc)
+    distance = dtw_distance(
+        user_mfcc,
+        reference_mfcc,
+        sakoe_chiba_radius=sakoe_chiba_radius,
+    )
     if not np.isfinite(distance):
         return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
 
@@ -81,6 +86,7 @@ def analyze(
     n_mfcc: int = 20,
     frame_ms: int = 25,
     hop_ms: int = 10,
+    sakoe_chiba_radius: int | None = None,
 ) -> ScoringResult:
     # препроцессинг
     user_audio = preprocess_audio(user_audio_path)
@@ -124,6 +130,7 @@ def analyze(
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
+            sakoe_chiba_radius=sakoe_chiba_radius,
         )
         for path in reference_paths
     ]

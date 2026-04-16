@@ -42,6 +42,52 @@ def test_dtw_distance_identical_features_is_zero() -> None:
     assert distance == 0.0
 
 
+def test_dtw_distance_passes_sakoe_chiba_radius(monkeypatch) -> None:
+    features = np.array(
+        [
+            [0.0, 0.2, 0.4],
+            [1.0, 0.9, 0.8],
+        ],
+        dtype=np.float32,
+    )
+    captured: dict[str, int | None] = {}
+
+    def fake_distance(seq_a, seq_b, window=None):
+        _ = (seq_a, seq_b)
+        captured["window"] = window
+        return 0.0
+
+    monkeypatch.setattr("classic_approach.dtw.dtw_ndim.distance", fake_distance)
+
+    distance = dtw_distance(features, features, sakoe_chiba_radius=12)
+
+    assert distance == 0.0
+    assert captured["window"] == 12
+
+
+def test_dtw_distance_disables_band_for_non_positive_radius(monkeypatch) -> None:
+    features = np.array(
+        [
+            [0.0, 0.2, 0.4],
+            [1.0, 0.9, 0.8],
+        ],
+        dtype=np.float32,
+    )
+    captured: dict[str, int | None] = {}
+
+    def fake_distance(seq_a, seq_b, window=None):
+        _ = (seq_a, seq_b)
+        captured["window"] = window
+        return 0.0
+
+    monkeypatch.setattr("classic_approach.dtw.dtw_ndim.distance", fake_distance)
+
+    distance = dtw_distance(features, features, sakoe_chiba_radius=0)
+
+    assert distance == 0.0
+    assert captured["window"] is None
+
+
 def test_apply_cmvn_rowwise_mean_and_std() -> None:
     mfcc = np.array(
         [

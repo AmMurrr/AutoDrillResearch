@@ -97,10 +97,85 @@ def test_compare_embeddings_cosine_identical_sequences() -> None:
     assert np.isclose(result.temporal_distance, 0.0, atol=1e-6)
 
 
+def test_compare_embeddings_passes_sakoe_chiba_radius(monkeypatch) -> None:
+    frames = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    captured: dict[str, int | None] = {}
+
+    def fake_distance(seq_a, seq_b, window=None):
+        _ = (seq_a, seq_b)
+        captured["window"] = window
+        return 0.0
+
+    monkeypatch.setattr("neural_approach.embedding_comparator.dtw_ndim.distance", fake_distance)
+
+    result = compare_embeddings(
+        frames,
+        frames,
+        metric="cosine",
+        sakoe_chiba_radius=9,
+    )
+
+    assert result.metric == "cosine"
+    assert captured["window"] == 9
+
+
+def test_compare_embeddings_disables_band_for_non_positive_radius(monkeypatch) -> None:
+    frames = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    captured: dict[str, int | None] = {}
+
+    def fake_distance(seq_a, seq_b, window=None):
+        _ = (seq_a, seq_b)
+        captured["window"] = window
+        return 0.0
+
+    monkeypatch.setattr("neural_approach.embedding_comparator.dtw_ndim.distance", fake_distance)
+
+    compare_embeddings(
+        frames,
+        frames,
+        metric="cosine",
+        sakoe_chiba_radius=0,
+    )
+
+    assert captured["window"] is None
+
+
 def test_compare_embeddings_invalid_metric() -> None:
     frames = np.ones((3, 4), dtype=np.float32)
     with pytest.raises(ValueError):
         compare_embeddings(frames, frames, metric="manhattan")
+
+
+def test_compare_embeddings_euclidean_not_supported() -> None:
+    frames = np.ones((3, 4), dtype=np.float32)
+    with pytest.raises(ValueError):
+        compare_embeddings(frames, frames, metric="euclidean")
+
+
+def test_neural_analyze_euclidean_not_supported() -> None:
+    with pytest.raises(ValueError):
+        analyze(
+            user_audio_path="unused.wav",
+            reference_audio_path="unused.wav",
+            transcript="hello",
+            similarity="euclidean",
+            model_name=DEFAULT_MODEL_NAME,
+            hf_token=None,
+        )
 
 
 def test_compute_scoring_result_verdict_thresholds() -> None:

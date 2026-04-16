@@ -27,6 +27,13 @@ def _normalize_rows(matrix: np.ndarray, eps: float = 1e-8) -> np.ndarray:
 	return matrix / np.maximum(norms, eps)
 
 
+def _resolve_similarity_metric(metric: str) -> str:
+	metric_key = metric.strip().lower()
+	if metric_key != "cosine":
+		raise ValueError("Only 'cosine' metric is supported")
+	return metric_key
+
+
 def _aligned_low_quantile_cosine(
 	user_embeddings: np.ndarray,
 	reference_embeddings: np.ndarray,
@@ -60,14 +67,10 @@ def _aligned_low_quantile_cosine(
 
 
 def _detect_word_mismatch_issue(
-	metric: str,
 	pooled_similarity: float,
 	user_embeddings: np.ndarray,
 	reference_embeddings: np.ndarray,
 ) -> list[str]:
-	if metric != "cosine":
-		return []
-
 	low_quantile = _aligned_low_quantile_cosine(user_embeddings, reference_embeddings, quantile=0.10)
 	consistency_gap = float(pooled_similarity) - low_quantile
 
@@ -86,6 +89,7 @@ def _analyze_against_single_reference(
 	model_name: str,
 	device: str | None,
 	hf_token: str | None,
+	sakoe_chiba_radius: int | None,
 ) -> ScoringResult:
 	reference_audio = preprocess_audio(reference_audio_path)
 	reference_embeddings = extract_wav2vec_embeddings(
@@ -100,10 +104,10 @@ def _analyze_against_single_reference(
 		user_embeddings=user_frame_embeddings,
 		reference_embeddings=reference_embeddings.frame_embeddings,
 		metric=similarity,
+		sakoe_chiba_radius=sakoe_chiba_radius,
 	)
 
 	phoneme_issues = _detect_word_mismatch_issue(
-		metric=comparison.metric,
 		pooled_similarity=comparison.similarity,
 		user_embeddings=user_frame_embeddings,
 		reference_embeddings=reference_embeddings.frame_embeddings,
@@ -128,7 +132,10 @@ def analyze(
 	model_name: str = DEFAULT_MODEL_NAME,
 	device: str | None = None,
 	hf_token: str | None = None,
+	sakoe_chiba_radius: int | None = None,
 ) -> ScoringResult:
+	metric_key = _resolve_similarity_metric(similarity)
+
 	# transcript пока не используется в логике, оставлен для будущей
 	# диагностики по словам/фонемам.
 	_ = transcript
@@ -142,7 +149,7 @@ def analyze(
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
-			metric=similarity,
+			metric=metric_key,
 			model_name=model_name,
 			phoneme_issues=["word:unrecognized"],
 			status="empty_audio",
@@ -154,7 +161,7 @@ def analyze(
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
-			metric=similarity,
+			metric=metric_key,
 			model_name=model_name,
 		)
 
@@ -169,7 +176,7 @@ def analyze(
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
-			metric=similarity,
+			metric=metric_key,
 			model_name=model_name,
 		)
 
@@ -177,10 +184,11 @@ def analyze(
 		_analyze_against_single_reference(
 			user_frame_embeddings=user_embeddings.frame_embeddings,
 			reference_audio_path=path,
-			similarity=similarity,
+			similarity=metric_key,
 			model_name=model_name,
 			device=device,
 			hf_token=hf_token,
+			sakoe_chiba_radius=sakoe_chiba_radius,
 		)
 		for path in reference_paths
 	]

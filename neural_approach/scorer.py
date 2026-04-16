@@ -55,11 +55,10 @@ def _build_scoring_result(
 
 def _similarity_to_quality(similarity: float, metric: str) -> float:
 	metric_key = metric.strip().lower()
-	if metric_key == "cosine":
-		# Переводим cosine из диапазона [-1, 1] в [0, 1] для стабильного объединения метрик.
-		quality = (float(similarity) + 1.0) / 2.0
-	else:
-		quality = float(similarity)
+	if metric_key != "cosine":
+		raise ValueError("Only 'cosine' metric is supported")
+	# Переводим cosine из диапазона [-1, 1] в [0, 1] для стабильного объединения метрик.
+	quality = (float(similarity) + 1.0) / 2.0
 	return float(np.clip(quality, 0.0, 1.0))
 
 
