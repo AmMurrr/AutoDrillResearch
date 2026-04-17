@@ -7,6 +7,21 @@ from neural_approach.wav2vec_extractor import DEFAULT_MODEL_NAME, HF_TOKEN_ENV_V
 from app.reference_db import init_db, list_reference_paths
 
 
+def _parse_word_mismatch_reason(reason: str) -> tuple[str, str]:
+    expected = ""
+    recognized = ""
+    for part in (reason or "").split(";"):
+        if ":" not in part:
+            continue
+        key, value = part.split(":", maxsplit=1)
+        normalized_key = key.strip().lower()
+        if normalized_key == "expected":
+            expected = value.strip()
+        elif normalized_key == "recognized":
+            recognized = value.strip()
+    return expected, recognized
+
+
 def _verdict_to_russian(verdict: str) -> str:
     verdict_map = {
         "good": "хорошо",
@@ -96,6 +111,12 @@ with col3:
         help="0 отключает ограничение окна temporal DTW.",
     )
 
+use_vosk = st.checkbox(
+    "Проверять слово через Vosk перед эмбеддингами",
+    value=True,
+    help="Если Vosk распознает другое слово, результат сразу помечается как wrong_word с оценкой 0.",
+)
+
 hf_token = st.text_input(
     "HF_TOKEN (опционально)",
     value="",
@@ -148,6 +169,7 @@ if st.button("Запустить MVP", type="primary"):
                         device=None if device_choice == "auto" else device_choice,
                         hf_token=resolved_hf_token,
                         sakoe_chiba_radius=int(sakoe_chiba_radius),
+                        use_vosk=use_vosk,
                     )
                 except Exception as exc:
                     st.error(f"Ошибка при анализе: {exc}")
@@ -163,6 +185,7 @@ if st.button("Запустить MVP", type="primary"):
                         "attempt_path_used": resolved_attempt_path,
                         "transcript": transcript,
                         "sakoe_chiba_radius": int(sakoe_chiba_radius),
+                        "use_vosk": use_vosk,
                         "metric": result.metric,
                         "model_name": result.model_name,
                         "pronunciation_score": result.pronunciation_score,
@@ -193,6 +216,21 @@ if st.button("Запустить MVP", type="primary"):
                             "Нераспознанное слово: в записи недостаточно речевого сигнала "
                             "(пусто, слишком тихо или обрыв). Повторите попытку."
                         )
+                    elif result.status == "wrong_word":
+                        expected, recognized = _parse_word_mismatch_reason(result.reason)
+                        st.error(
+                            "Распознано другое слово. "
+                            f"Ожидалось: '{expected or transcript.strip().lower()}', "
+                            f"распознано: '{recognized or 'не распознано'}'. "
+                            "Оценка выставлена в 0."
+                        )
+                    elif result.status == "asr_error":
+                        st.warning(
+                            "Vosk не смог выполнить проверку слова. "
+                            "Можно повторить попытку или временно отключить Vosk в параметрах."
+                        )
+                        if result.reason:
+                            st.caption(result.reason)
                     else:
                         _render_verdict_block(result.verdict)
 

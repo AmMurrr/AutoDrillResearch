@@ -6,6 +6,21 @@ from classic_approach.pipeline import analyze
 from app.reference_db import init_db, list_reference_paths
 
 
+def _parse_word_mismatch_reason(reason: str) -> tuple[str, str]:
+    expected = ""
+    recognized = ""
+    for part in (reason or "").split(";"):
+        if ":" not in part:
+            continue
+        key, value = part.split(":", maxsplit=1)
+        normalized_key = key.strip().lower()
+        if normalized_key == "expected":
+            expected = value.strip()
+        elif normalized_key == "recognized":
+            recognized = value.strip()
+    return expected, recognized
+
+
 def _render_verdict_block(verdict: str) -> None:
     if verdict == "хорошо":
         st.success("Итог: произношение звучит уверенно и близко к эталону.")
@@ -85,6 +100,12 @@ with col4:
         help="0 отключает ограничение окна DTW.",
     )
 
+use_vosk = st.checkbox(
+    "Проверять слово через Vosk перед DTW",
+    value=True,
+    help="Если Vosk распознает другое слово, результат сразу помечается как wrong_word с оценкой 0.",
+)
+
 if st.button("Запустить MVP", type="primary"):
     audio_source = recorded_attempt if recorded_attempt is not None else uploaded_attempt
     tmp_path = None
@@ -124,6 +145,7 @@ if st.button("Запустить MVP", type="primary"):
                 frame_ms=frame_ms,
                 hop_ms=hop_ms,
                 sakoe_chiba_radius=int(sakoe_chiba_radius),
+                use_vosk=use_vosk,
             )
             st.success("MVP выполнен")
             result_payload = {
@@ -138,6 +160,7 @@ if st.button("Запустить MVP", type="primary"):
                 "frame_ms": frame_ms,
                 "hop_ms": hop_ms,
                 "sakoe_chiba_radius": int(sakoe_chiba_radius),
+                "use_vosk": use_vosk,
                 "оценка_произношения": result.dtw_score,
                 "вердикт": result.verdict,
                 "status": result.status,
@@ -163,6 +186,21 @@ if st.button("Запустить MVP", type="primary"):
                     "Нераспознанное слово: в записи недостаточно речевого сигнала "
                     "(пусто, слишком тихо или обрыв). Повторите попытку."
                 )
+            elif result.status == "wrong_word":
+                expected, recognized = _parse_word_mismatch_reason(result.reason)
+                st.error(
+                    "Распознано другое слово. "
+                    f"Ожидалось: '{expected or transcript.strip().lower()}', "
+                    f"распознано: '{recognized or 'не распознано'}'. "
+                    "Оценка выставлена в 0."
+                )
+            elif result.status == "asr_error":
+                st.warning(
+                    "Vosk не смог выполнить проверку слова. "
+                    "Можно повторить попытку или временно отключить Vosk в параметрах."
+                )
+                if result.reason:
+                    st.caption(result.reason)
             else:
                 _render_verdict_block(result.verdict)
 

@@ -124,10 +124,11 @@ dependencies = [
     "typing_extensions==4.15.0",
     "tzdata==2025.3",
     "urllib3==2.6.3",
+    "vosk==0.3.45",
     "watchdog==6.0.0",
     "wheel==0.46.3",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app", "app.*", "classic_approach", "classic_approach.*", "neural_approach", "neural_approach.*"]
+include = ["app", "app.*", "asr", "asr.*", "classic_approach", "classic_approach.*", "neural_approach", "neural_approach.*"]

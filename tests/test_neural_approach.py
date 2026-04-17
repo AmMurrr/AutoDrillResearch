@@ -32,6 +32,18 @@ HELLO_EMPTY_AUDIO = TEST_DATA_DIR / "hello_empty.wav"
 _ANALYZE_CACHE: dict[str, object] = {}
 
 
+@pytest.fixture(autouse=True)
+def _mock_vosk_word_gate(monkeypatch):
+    monkeypatch.setattr(
+        "neural_approach.pipeline.check_expected_text_for_preprocessed_audio",
+        lambda samples, sample_rate, expected_text: SimpleNamespace(
+            is_match=True,
+            expected_text=(expected_text or "").strip().lower(),
+            recognized_text=(expected_text or "").strip().lower(),
+        ),
+    )
+
+
 def _require_hf_token() -> str:
     token = resolve_hf_token(None)
     if token:
@@ -220,11 +232,29 @@ def test_neural_analyze_hello_problem_is_low_quality() -> None:
     assert result.verdict == "неудовлетворительно"
 
 
-def test_neural_analyze_hello_wrong_word_produces_valid_score() -> None:
-    result = _analyze_test_audio(HELLO_WRONG_WORD_AUDIO)
+def test_neural_analyze_hello_wrong_word_returns_zero_with_vosk(monkeypatch) -> None:
+    _ANALYZE_CACHE.pop(str(HELLO_WRONG_WORD_AUDIO.resolve()), None)
+    monkeypatch.setattr(
+        "neural_approach.pipeline.check_expected_text_for_preprocessed_audio",
+        lambda samples, sample_rate, expected_text: SimpleNamespace(
+            is_match=False,
+            expected_text="hello",
+            recognized_text="happy",
+        ),
+    )
 
-    assert 0.0 <= result.pronunciation_score <= 100.0
-    assert result.status == "ok"
+    result = analyze(
+        user_audio_path=str(HELLO_WRONG_WORD_AUDIO),
+        reference_audio_path=str(REFERENCE_AUDIO),
+        transcript="hello",
+        similarity="cosine",
+        model_name=DEFAULT_MODEL_NAME,
+        hf_token=None,
+    )
+
+    assert result.pronunciation_score == 0.0
+    assert result.status == "wrong_word"
+    assert "recognized:happy" in result.reason
 
 
 def test_neural_analyze_real_audio_ordering() -> None:

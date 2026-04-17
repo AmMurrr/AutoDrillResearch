@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from asr.vosk import VoskError, check_expected_text_for_preprocessed_audio
 
 from .dtw import dtw_distance
 from .forced_aligner import pseudo_localize_errors
@@ -87,6 +88,7 @@ def analyze(
     frame_ms: int = 25,
     hop_ms: int = 10,
     sakoe_chiba_radius: int | None = None,
+    use_vosk: bool = True,
 ) -> ScoringResult:
     # препроцессинг
     user_audio = preprocess_audio(user_audio_path)
@@ -103,6 +105,37 @@ def analyze(
             status="empty_audio",
             reason="insufficient_speech",
         )
+
+    if use_vosk:
+        try:
+            transcript_check = check_expected_text_for_preprocessed_audio(
+                samples=user_audio.samples,
+                sample_rate=user_audio.sample_rate,
+                expected_text=transcript,
+            )
+        except (VoskError, ValueError) as exc:
+            return ComputeScoringResult(
+                dtw_score=0.0,
+                phoneme_issues=["word:asr_error"],
+                distance=float("inf"),
+                error_localization=[],
+                status="asr_error",
+                reason=f"vosk_failure:{exc}",
+            )
+
+        if not transcript_check.is_match:
+            reason = (
+                f"recognized:{transcript_check.recognized_text};"
+                f"expected:{transcript_check.expected_text}"
+            )
+            return ComputeScoringResult(
+                dtw_score=0.0,
+                phoneme_issues=["word:wrong_word"],
+                distance=float("inf"),
+                error_localization=[],
+                status="wrong_word",
+                reason=reason,
+            )
 
     reference_paths = _resolve_reference_paths(reference_audio_path)
 
