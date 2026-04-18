@@ -194,7 +194,6 @@ if st.button("Запустить MVP", type="primary"):
                         "reason": result.reason,
                         "embedding_similarity": result.similarity,
                         "temporal_distance": result.temporal_distance,
-                        "problematic_phonemes": result.problematic_phonemes,
                     }
 
                     verdict_ru = _verdict_to_russian(result.verdict)
@@ -231,6 +230,10 @@ if st.button("Запустить MVP", type="primary"):
                         )
                         if result.reason:
                             st.caption(result.reason)
+                    elif result.status == "invalid_reference":
+                        st.error("Не удалось выполнить анализ: эталонные записи не заданы.")
+                        if result.reason:
+                            st.caption(result.reason)
                     else:
                         _render_verdict_block(result.verdict)
 
@@ -241,12 +244,6 @@ if st.button("Запустить MVP", type="primary"):
                     with details_col_2:
                         st.markdown("**Метрика**")
                         st.info(result.metric)
-
-                    st.markdown("#### Проблемные зоны")
-                    if result.problematic_phonemes:
-                        st.write(", ".join(result.problematic_phonemes))
-                    else:
-                        st.info("Явных проблемных зон не обнаружено.")
 
                     with st.expander("DEBUG"):
                         st.write(result_payload)

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
-from typing import List
 
 import numpy as np
 
@@ -12,7 +10,6 @@ class ScoringResult:
 	pronunciation_score: float
 	similarity: float
 	temporal_distance: float
-	problematic_phonemes: List[str]
 	verdict: str
 	metric: str
 	model_name: str
@@ -32,7 +29,6 @@ def _build_scoring_result(
 	pronunciation_score: float,
 	similarity: float,
 	temporal_distance: float,
-	phoneme_issues: list[str] | None,
 	metric: str,
 	model_name: str,
 	status: str = "ok",
@@ -44,7 +40,6 @@ def _build_scoring_result(
 		pronunciation_score=clipped_score,
 		similarity=float(similarity),
 		temporal_distance=float(temporal_distance),
-		problematic_phonemes=list(phoneme_issues or []),
 		verdict=_verdict_from_score(clipped_score),
 		metric=metric_key,
 		model_name=model_name,
@@ -89,22 +84,11 @@ def _duration_penalty(user_frames: int | None, reference_frames: int | None) -> 
 	return float(np.clip(base_penalty * long_utterance_penalty, 0.0, 1.0))
 
 
-def _issue_penalty(phoneme_issues: list[str] | None) -> float:
-	issues = list(phoneme_issues or [])
-	if not issues:
-		return 1.0
-
-	# Явные локальные аномалии по кадрам считаем сильным признаком ошибки слова.
-	penalty = np.exp(-1.6 * len(set(issues)))
-	return float(np.clip(penalty, 0.1, 1.0))
-
-
 def compute_scoring_result(
 	similarity: float,
 	temporal_distance: float,
 	metric: str,
 	model_name: str,
-	phoneme_issues: list[str] | None = None,
 	user_frames: int | None = None,
 	reference_frames: int | None = None,
 	status: str = "ok",
@@ -115,7 +99,6 @@ def compute_scoring_result(
 			pronunciation_score=0.0,
 			similarity=float(similarity),
 			temporal_distance=float(temporal_distance),
-			phoneme_issues=phoneme_issues,
 			metric=metric,
 			model_name=model_name,
 			status=status,
@@ -125,19 +108,17 @@ def compute_scoring_result(
 	similarity_quality = _similarity_to_quality(similarity, metric)
 	temporal_quality = _temporal_distance_to_quality(temporal_distance)
 	duration_quality = _duration_penalty(user_frames, reference_frames)
-	issue_penalty = _issue_penalty(phoneme_issues)
 
 	# Основной вклад даёт общее сходство произношения,
 	# но временное выравнивание тоже учитывается.
 	base_score = 100.0 * (0.7 * similarity_quality + 0.3 * temporal_quality)
-	score = base_score * duration_quality * issue_penalty
+	score = base_score * duration_quality
 	score = float(np.clip(score, 0.0, 100.0))
 
 	return _build_scoring_result(
 		pronunciation_score=score,
 		similarity=float(similarity),
 		temporal_distance=float(temporal_distance),
-		phoneme_issues=phoneme_issues,
 		metric=metric,
 		model_name=model_name,
 		status=status,
@@ -151,9 +132,10 @@ def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 			pronunciation_score=0.0,
 			similarity=0.0,
 			temporal_distance=float("inf"),
-			phoneme_issues=[],
 			metric="cosine",
 			model_name="unknown",
+			status="invalid_reference",
+			reason="no_results",
 		)
 
 	aggregated_score = float(np.mean([result.pronunciation_score for result in results]))
@@ -164,20 +146,11 @@ def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 		float(np.mean(finite_distances)) if finite_distances else float("inf")
 	)
 
-	issue_counter: Counter[str] = Counter(
-		issue for result in results for issue in result.problematic_phonemes
-	)
-	majority_threshold = (len(results) // 2) + 1
-	aggregated_issues = sorted(
-		issue for issue, count in issue_counter.items() if count >= majority_threshold
-	)
-
 	first_result = results[0]
 	return _build_scoring_result(
 		pronunciation_score=aggregated_score,
 		similarity=aggregated_similarity,
 		temporal_distance=aggregated_temporal_distance,
-		phoneme_issues=aggregated_issues,
 		metric=first_result.metric,
 		model_name=first_result.model_name,
 	)

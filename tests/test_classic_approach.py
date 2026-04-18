@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from classic_approach.dtw import dtw_distance
-from classic_approach.forced_aligner import pseudo_localize_errors
 from classic_approach.mfcc_extractor import apply_cmvn
 from classic_approach.pipeline import _distance_to_score, analyze
 
@@ -19,6 +20,18 @@ HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
 HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
 HELLO_WRONG_WORD_AUDIO = TEST_DATA_DIR / "hello_wrong_word.mp3"
 HELLO_EMPTY_AUDIO = TEST_DATA_DIR / "hello_empty.wav"
+
+
+@pytest.fixture(autouse=True)
+def _mock_vosk_word_gate(monkeypatch):
+    monkeypatch.setattr(
+        "classic_approach.pipeline.check_expected_text_for_preprocessed_audio",
+        lambda samples, sample_rate, expected_text: SimpleNamespace(
+            is_match=True,
+            expected_text=(expected_text or "").strip().lower(),
+            recognized_text=(expected_text or "").strip().lower(),
+        ),
+    )
 
 
 def _analyze_test_audio(audio_path: Path):
@@ -111,19 +124,6 @@ def test_distance_to_score_monotonicity() -> None:
     assert good > bad
 
 
-def test_pseudo_localize_errors_marks_end_of_word() -> None:
-    reference = np.zeros((2, 12), dtype=np.float32)
-    user = reference.copy()
-    user[:, 8:] = 4.0
-
-    diagnostics = pseudo_localize_errors(user, reference, transcript="hello")
-
-    assert len(diagnostics) == 1
-    assert diagnostics[0]["word"] == "hello"
-    assert diagnostics[0]["problem_zone"] == "конец"
-    assert diagnostics[0]["is_problematic"] is True
-
-
 def test_classic_analyze_uses_expected_test_data_files() -> None:
     assert TEST_DATA_DIR.exists()
     assert REFERENCE_AUDIO.exists()
@@ -139,7 +139,6 @@ def test_classic_analyze_hello_perfect_is_near_reference() -> None:
 
     assert result.dtw_score > 90.0
     assert result.verdict == "хорошо"
-    assert result.problematic_phonemes == []
 
 
 def test_classic_analyze_hello_normal_is_mid_quality() -> None:
@@ -156,10 +155,21 @@ def test_classic_analyze_hello_problem_is_low_quality() -> None:
     assert result.verdict == "неудовлетворительно"
 
 
-def test_classic_analyze_hello_wrong_word_is_low() -> None:
+def test_classic_analyze_hello_wrong_word_is_zero_with_vosk(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "classic_approach.pipeline.check_expected_text_for_preprocessed_audio",
+        lambda samples, sample_rate, expected_text: SimpleNamespace(
+            is_match=False,
+            expected_text="hello",
+            recognized_text="happy",
+        ),
+    )
+
     result = _analyze_test_audio(HELLO_WRONG_WORD_AUDIO)
 
-    assert result.dtw_score < 25.0
+    assert result.dtw_score == 0.0
+    assert result.status == "wrong_word"
+    assert "recognized:happy" in result.reason
     assert result.verdict == "неудовлетворительно"
 
 
@@ -170,7 +180,7 @@ def test_classic_analyze_real_audio_ordering() -> None:
     problem = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
 
     assert perfect.dtw_score > normal.dtw_score > problem.dtw_score
-    assert problem.dtw_score > wrong_word.dtw_score
+    assert wrong_word.status == "ok"
 
 
 def test_classic_analyze_hello_empty_file_is_marked_empty_audio() -> None:

@@ -4,7 +4,6 @@ import numpy as np
 from asr.vosk import VoskError, check_expected_text_for_preprocessed_audio
 
 from .dtw import dtw_distance
-from .forced_aligner import pseudo_localize_errors
 from .input_gate import validate_speech_signal
 from .mfcc_extractor import extract_mfcc
 from .preprocessing import preprocess_audio
@@ -33,7 +32,6 @@ def _resolve_reference_paths(reference_audio_path: str | list[str]) -> list[str]
 def _analyze_against_single_reference(
     user_mfcc: np.ndarray,
     reference_audio_path: str,
-    transcript: str,
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
@@ -49,7 +47,7 @@ def _analyze_against_single_reference(
     )
 
     if user_mfcc.shape[1] == 0 or reference_mfcc.shape[1] == 0:
-        return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
+        return ComputeScoringResult(dtw_score=0.0, distance=float("inf"))
 
     distance = dtw_distance(
         user_mfcc,
@@ -57,25 +55,12 @@ def _analyze_against_single_reference(
         sakoe_chiba_radius=sakoe_chiba_radius,
     )
     if not np.isfinite(distance):
-        return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
-
-    error_localization = pseudo_localize_errors(
-        user_mfcc=user_mfcc,
-        reference_mfcc=reference_mfcc,
-        transcript=transcript,
-    )
-    problematic_regions = [
-        f"{entry['word']}:{entry['problem_zone']}"
-        for entry in error_localization
-        if bool(entry.get("is_problematic"))
-    ]
+        return ComputeScoringResult(dtw_score=0.0, distance=float("inf"))
 
     return compute_scoring_result_from_distance(
         distance=float(distance),
         user_frames=int(user_mfcc.shape[1]),
         reference_frames=int(reference_mfcc.shape[1]),
-        phoneme_issues=problematic_regions,
-        error_localization=error_localization,
     )
 
 
@@ -99,9 +84,7 @@ def analyze(
     if not speech_gate.passed:
         return ComputeScoringResult(
             dtw_score=0.0,
-            phoneme_issues=["word:unrecognized"],
             distance=float("inf"),
-            error_localization=[],
             status="empty_audio",
             reason="insufficient_speech",
         )
@@ -116,9 +99,7 @@ def analyze(
         except (VoskError, ValueError) as exc:
             return ComputeScoringResult(
                 dtw_score=0.0,
-                phoneme_issues=["word:asr_error"],
                 distance=float("inf"),
-                error_localization=[],
                 status="asr_error",
                 reason=f"vosk_failure:{exc}",
             )
@@ -130,9 +111,7 @@ def analyze(
             )
             return ComputeScoringResult(
                 dtw_score=0.0,
-                phoneme_issues=["word:wrong_word"],
                 distance=float("inf"),
-                error_localization=[],
                 status="wrong_word",
                 reason=reason,
             )
@@ -140,7 +119,12 @@ def analyze(
     reference_paths = _resolve_reference_paths(reference_audio_path)
 
     if not reference_paths:
-        return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float("inf"),
+            status="invalid_reference",
+            reason="no_reference_paths",
+        )
 
     # извлечение MFCC
     user_mfcc = extract_mfcc(
@@ -153,13 +137,17 @@ def analyze(
 
     # если MFCC не удалось извлечь
     if user_mfcc.shape[1] == 0:
-        return ComputeScoringResult(0.0, [], float("inf"), error_localization=[])
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float("inf"),
+            status="empty_audio",
+            reason="empty_features",
+        )
 
     per_reference_results = [
         _analyze_against_single_reference(
             user_mfcc=user_mfcc,
             reference_audio_path=path,
-            transcript=transcript,
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,

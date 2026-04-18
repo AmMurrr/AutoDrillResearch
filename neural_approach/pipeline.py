@@ -60,7 +60,6 @@ def _analyze_against_single_reference(
 		temporal_distance=comparison.temporal_distance,
 		metric=comparison.metric,
 		model_name=model_name,
-		phoneme_issues=[],
 		user_frames=int(user_frame_embeddings.shape[0]),
 		reference_frames=int(reference_embeddings.frame_embeddings.shape[0]),
 	)
@@ -90,7 +89,6 @@ def analyze(
 			temporal_distance=float("inf"),
 			metric=metric_key,
 			model_name=model_name,
-			phoneme_issues=["word:unrecognized"],
 			status="empty_audio",
 			reason="insufficient_speech",
 		)
@@ -108,7 +106,6 @@ def analyze(
 				temporal_distance=float("inf"),
 				metric=metric_key,
 				model_name=model_name,
-				phoneme_issues=["word:asr_error"],
 				status="asr_error",
 				reason=f"vosk_failure:{exc}",
 			)
@@ -123,7 +120,6 @@ def analyze(
 				temporal_distance=float("inf"),
 				metric=metric_key,
 				model_name=model_name,
-				phoneme_issues=["word:wrong_word"],
 				status="wrong_word",
 				reason=reason,
 			)
@@ -135,6 +131,8 @@ def analyze(
 			temporal_distance=float("inf"),
 			metric=metric_key,
 			model_name=model_name,
+			status="invalid_reference",
+			reason="no_reference_paths",
 		)
 
 	user_embeddings = extract_wav2vec_embeddings(
@@ -150,6 +148,8 @@ def analyze(
 			temporal_distance=float("inf"),
 			metric=metric_key,
 			model_name=model_name,
+			status="empty_audio",
+			reason="empty_embeddings",
 		)
 
 	per_reference_results = [

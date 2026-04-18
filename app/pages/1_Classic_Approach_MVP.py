@@ -165,9 +165,7 @@ if st.button("Запустить MVP", type="primary"):
                 "вердикт": result.verdict,
                 "status": result.status,
                 "reason": result.reason,
-                "проблемные_зоны": result.problematic_phonemes,
                 "dtw_дистанция": result.distance,
-                "локализация_ошибок": result.error_localization,
             }
 
             st.markdown("### Результат")
@@ -201,34 +199,12 @@ if st.button("Запустить MVP", type="primary"):
                 )
                 if result.reason:
                     st.caption(result.reason)
+            elif result.status == "invalid_reference":
+                st.error("Не удалось выполнить анализ: эталонные записи не заданы.")
+                if result.reason:
+                    st.caption(result.reason)
             else:
                 _render_verdict_block(result.verdict)
-
-            st.markdown("#### Локализация ошибок")
-            if result.error_localization:
-                rows = []
-                for item in result.error_localization:
-                    zone_errors = item.get("zone_errors", {})
-                    rows.append(
-                        {
-                            "слово": item.get("word", ""),
-                            "зона_проблемы": item.get("problem_zone", ""),
-                            "статус": "проблема" if item.get("is_problematic") else "норма",
-                            "относительная_ошибка": item.get("relative_error", 0.0),
-                            "ошибка_начало": zone_errors.get("начало", zone_errors.get("beginning", 0.0)),
-                            "ошибка_середина": zone_errors.get("середина", zone_errors.get("middle", 0.0)),
-                            "ошибка_конец": zone_errors.get("конец", zone_errors.get("end", 0.0)),
-                        }
-                    )
-                st.dataframe(rows, use_container_width=True, hide_index=True)
-            else:
-                st.info("Явных локальных проблем не обнаружено на уровне псевдо-align по DTW.")
-
-            if result.problematic_phonemes:
-                st.markdown("#### Краткий список проблемных зон")
-                st.write(", ".join(result.problematic_phonemes))
-            else:
-                st.info("Критичных проблемных зон не выделено.")
 
             with st.expander("DEBUG"):
                 st.write(result_payload)

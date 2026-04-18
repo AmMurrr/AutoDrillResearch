@@ -215,7 +215,6 @@ def test_neural_analyze_hello_perfect_is_near_reference() -> None:
 
     assert result.pronunciation_score > 70.0
     assert result.verdict in {"хорошо", "удовлетворительно"}
-    assert result.problematic_phonemes == []
 
 
 def test_neural_analyze_hello_normal_is_mid_quality() -> None:
