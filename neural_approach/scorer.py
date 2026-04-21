@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from scoring.anchor_calibration import SigmoidCalibrationParams, sigmoid_score
+
 
 @dataclass
 class ScoringResult:
@@ -15,6 +17,9 @@ class ScoringResult:
 	model_name: str
 	status: str = "ok"
 	reason: str = ""
+	raw_distance: float = float("inf")
+	d100: float | None = None
+	d0: float | None = None
 
 
 def _verdict_from_score(score: float) -> str:
@@ -33,6 +38,9 @@ def _build_scoring_result(
 	model_name: str,
 	status: str = "ok",
 	reason: str = "",
+	raw_distance: float = float("inf"),
+	d100: float | None = None,
+	d0: float | None = None,
 ) -> ScoringResult:
 	clipped_score = float(np.clip(float(pronunciation_score), 0.0, 100.0))
 	metric_key = metric.strip().lower()
@@ -45,43 +53,109 @@ def _build_scoring_result(
 		model_name=model_name,
 		status=status,
 		reason=reason,
+		raw_distance=float(raw_distance),
+		d100=d100,
+		d0=d0,
 	)
 
 
-def _similarity_to_quality(similarity: float, metric: str) -> float:
+def _resolve_metric(metric: str) -> str:
 	metric_key = metric.strip().lower()
 	if metric_key != "cosine":
 		raise ValueError("Only 'cosine' metric is supported")
-	# Переводим cosine из диапазона [-1, 1] в [0, 1] для стабильного объединения метрик.
-	quality = (float(similarity) + 1.0) / 2.0
-	return float(np.clip(quality, 0.0, 1.0))
+	return metric_key
 
 
-def _temporal_distance_to_quality(distance: float) -> float:
-	if not np.isfinite(distance):
-		return 0.0
-	# Экспоненциальный спад: малые DTW-дистанции дают качество близкое к 1.0,
-	# а плохое выравнивание быстро снижает итог.
-	quality = np.exp(-3.5 * max(float(distance), 0.0))
-	return float(np.clip(quality, 0.0, 1.0))
+def _semantic_distance_from_similarity(similarity: float, metric: str) -> float:
+	metric_key = _resolve_metric(metric)
+	if metric_key != "cosine":
+		raise ValueError("Only 'cosine' metric is supported")
+	cosine_quality = (float(similarity) + 1.0) / 2.0
+	cosine_quality = float(np.clip(cosine_quality, 0.0, 1.0))
+	return float(1.0 - cosine_quality)
 
 
-def _duration_penalty(user_frames: int | None, reference_frames: int | None) -> float:
-	"""Штраф за существенное расхождение длительностей попытки и эталона."""
-	if user_frames is None or reference_frames is None:
-		return 1.0
+def compute_raw_distance(
+	similarity: float,
+	temporal_distance: float,
+	metric: str,
+	alpha: float = 0.65,
+) -> float:
+	metric_key = _resolve_metric(metric)
+	if metric_key != "cosine":
+		raise ValueError("Only 'cosine' metric is supported")
 
-	if user_frames <= 0 or reference_frames <= 0:
-		return 0.0
+	temporal = float(max(float(temporal_distance), 0.0))
+	if not np.isfinite(temporal):
+		return float("inf")
 
-	frame_ratio = max(user_frames, reference_frames) / max(1, min(user_frames, reference_frames))
-	log_ratio = abs(np.log(frame_ratio))
+	weight = float(np.clip(float(alpha), 0.0, 1.0))
+	semantic = _semantic_distance_from_similarity(float(similarity), metric_key)
+	return float(weight * temporal + (1.0 - weight) * semantic)
 
-	# Плавный штраф при умеренной разнице и более сильный при явной растяжке.
-	base_penalty = np.exp(-0.6 * (log_ratio**2))
-	long_utterance_penalty = np.exp(-0.35 * max(frame_ratio - 3.0, 0.0))
 
-	return float(np.clip(base_penalty * long_utterance_penalty, 0.0, 1.0))
+def _default_calibration_params() -> SigmoidCalibrationParams:
+	return SigmoidCalibrationParams(
+		d100=0.15,
+		d0=0.55,
+		a=19.459101,
+		b=0.35,
+		epsilon=0.02,
+	)
+
+
+def compute_calibrated_scoring_result(
+	similarity: float,
+	temporal_distance: float,
+	metric: str,
+	model_name: str,
+	raw_distance: float,
+	calibration_params: SigmoidCalibrationParams,
+	status: str = "ok",
+	reason: str = "",
+	force_zero: bool = False,
+) -> ScoringResult:
+	if status != "ok":
+		return _build_scoring_result(
+			pronunciation_score=0.0,
+			similarity=float(similarity),
+			temporal_distance=float(temporal_distance),
+			metric=metric,
+			model_name=model_name,
+			status=status,
+			reason=reason,
+			raw_distance=float(raw_distance),
+			d100=calibration_params.d100,
+			d0=calibration_params.d0,
+		)
+
+	if force_zero or not np.isfinite(raw_distance):
+		return _build_scoring_result(
+			pronunciation_score=0.0,
+			similarity=float(similarity),
+			temporal_distance=float(temporal_distance),
+			metric=metric,
+			model_name=model_name,
+			status=status,
+			reason=reason,
+			raw_distance=float(raw_distance),
+			d100=calibration_params.d100,
+			d0=calibration_params.d0,
+		)
+
+	score = sigmoid_score(float(raw_distance), calibration_params)
+	return _build_scoring_result(
+		pronunciation_score=score,
+		similarity=float(similarity),
+		temporal_distance=float(temporal_distance),
+		metric=metric,
+		model_name=model_name,
+		status=status,
+		reason=reason,
+		raw_distance=float(raw_distance),
+		d100=calibration_params.d100,
+		d0=calibration_params.d0,
+	)
 
 
 def compute_scoring_result(
@@ -93,34 +167,25 @@ def compute_scoring_result(
 	reference_frames: int | None = None,
 	status: str = "ok",
 	reason: str = "",
+	alpha: float = 0.65,
 ) -> ScoringResult:
-	if status != "ok":
-		return _build_scoring_result(
-			pronunciation_score=0.0,
-			similarity=float(similarity),
-			temporal_distance=float(temporal_distance),
-			metric=metric,
-			model_name=model_name,
-			status=status,
-			reason=reason,
-		)
+	del user_frames
+	del reference_frames
 
-	similarity_quality = _similarity_to_quality(similarity, metric)
-	temporal_quality = _temporal_distance_to_quality(temporal_distance)
-	duration_quality = _duration_penalty(user_frames, reference_frames)
+	raw_distance = compute_raw_distance(
+		similarity=float(similarity),
+		temporal_distance=float(temporal_distance),
+		metric=metric,
+		alpha=alpha,
+	)
 
-	# Основной вклад даёт общее сходство произношения,
-	# но временное выравнивание тоже учитывается.
-	base_score = 100.0 * (0.7 * similarity_quality + 0.3 * temporal_quality)
-	score = base_score * duration_quality
-	score = float(np.clip(score, 0.0, 100.0))
-
-	return _build_scoring_result(
-		pronunciation_score=score,
+	return compute_calibrated_scoring_result(
 		similarity=float(similarity),
 		temporal_distance=float(temporal_distance),
 		metric=metric,
 		model_name=model_name,
+		raw_distance=raw_distance,
+		calibration_params=_default_calibration_params(),
 		status=status,
 		reason=reason,
 	)
@@ -140,10 +205,16 @@ def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 
 	aggregated_score = float(np.mean([result.pronunciation_score for result in results]))
 	aggregated_similarity = float(np.mean([result.similarity for result in results]))
+	finite_raw_distances = [result.raw_distance for result in results if np.isfinite(result.raw_distance)]
+	aggregated_raw_distance = (
+		float(np.mean(finite_raw_distances)) if finite_raw_distances else float("inf")
+	)
 
-	finite_distances = [result.temporal_distance for result in results if np.isfinite(result.temporal_distance)]
+	finite_temporal_distances = [
+		result.temporal_distance for result in results if np.isfinite(result.temporal_distance)
+	]
 	aggregated_temporal_distance = (
-		float(np.mean(finite_distances)) if finite_distances else float("inf")
+		float(np.mean(finite_temporal_distances)) if finite_temporal_distances else float("inf")
 	)
 
 	first_result = results[0]
@@ -153,4 +224,7 @@ def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 		temporal_distance=aggregated_temporal_distance,
 		metric=first_result.metric,
 		model_name=first_result.model_name,
+		raw_distance=aggregated_raw_distance,
+		d100=first_result.d100,
+		d0=first_result.d0,
 	)

@@ -4,7 +4,7 @@ from tempfile import NamedTemporaryFile
 import streamlit as st
 from neural_approach.pipeline import analyze
 from neural_approach.wav2vec_extractor import DEFAULT_MODEL_NAME, HF_TOKEN_ENV_VAR, resolve_hf_token
-from app.reference_db import init_db, list_reference_paths
+from scoring.anchor_calibration import describe_anchor_set, get_word_anchor_set, list_anchor_words, normalize_word
 
 
 def _parse_word_mismatch_reason(reason: str) -> tuple[str, str]:
@@ -45,41 +45,44 @@ def _render_verdict_block(verdict: str) -> None:
 
 
 st.title("Нейросетевой MVP")
-init_db()
-
 
 st.markdown("### Входные данные")
-transcript = st.text_input("Ожидаемый текст фразы", value="Hello")
+transcript = st.text_input("Ожидаемое слово", value="happy")
+anchor_word = normalize_word(transcript)
 
-default_word = transcript.strip().lower()
-reference_word = st.text_input("Слово для поиска эталонов в SQLite", value=default_word)
-
-references = list_reference_paths(word=reference_word.strip())
-if references:
-    st.caption(f"Найдено эталонов по слову '{reference_word.strip()}': {len(references)}")
-    st.dataframe(
-        [{"word": row["word"], "path": row["path"], "created_at": row["created_at"]} for row in references],
-        use_container_width=True,
-        hide_index=True,
-    )
-    if len(references) == 1:
-        references_to_use = 1
-        st.caption("Доступен один эталон: он будет использован автоматически.")
-    else:
-        references_to_use = st.slider(
-            "Сколько эталонов использовать в алгоритме",
-            min_value=1,
-            max_value=len(references),
-            value=min(3, len(references)),
-        )
-else:
-    st.info("По этому слову эталоны в БД не найдены")
-    references_to_use = 0
-
-manual_reference = st.text_input(
-    "Или укажите путь вручную (используется только один эталон)",
-    value="",
+max_anchors_preview = st.slider(
+    "Якорей на класс (лимит для калибровки)",
+    min_value=1,
+    max_value=30,
+    value=12,
 )
+
+anchor_set = get_word_anchor_set(
+    word=anchor_word,
+    max_anchors_per_class=max_anchors_preview,
+)
+anchor_stats = describe_anchor_set(anchor_set)
+
+available_words = list_anchor_words()
+if available_words:
+    st.caption("Слова с perfect-якорями в data/ref: " + ", ".join(available_words))
+else:
+    st.warning("В data/ref не найдены папки вида word_perfect с аудио")
+
+if anchor_set.has_required_anchors:
+    st.success(
+        "Якоря для слова готовы: "
+        f"perfect={anchor_stats['perfect']}, "
+        f"wrong={anchor_stats['wrong']}, "
+        f"moderate={anchor_stats['moderate']}, "
+        f"empty_word={anchor_stats['empty_word']}"
+    )
+else:
+    st.warning(
+        "Для выбранного слова не хватает якорей. "
+        "Нужны папки word_perfect и хотя бы один zero-класс "
+        "(word_wrong / word_moderate / _empty_word)."
+    )
 
 attempt_path = st.text_input(
     "Путь к аудио пользователя",
@@ -95,7 +98,7 @@ uploaded_attempt = st.file_uploader(
 recorded_attempt = st.audio_input("Или запишите попытку через микрофон", key="neural_recorded_attempt")
 
 st.markdown("### Параметры")
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     model_name = st.text_input("HF модель", value=DEFAULT_MODEL_NAME)
@@ -109,6 +112,14 @@ with col3:
         value=12,
         step=1,
         help="0 отключает ограничение окна temporal DTW.",
+    )
+with col4:
+    raw_distance_alpha = st.slider(
+        "Вес temporal в raw distance",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.65,
+        step=0.05,
     )
 
 use_vosk = st.checkbox(
@@ -138,31 +149,22 @@ if st.button("Запустить MVP", type="primary"):
             tmp_path = tmp.name
         resolved_attempt_path = tmp_path
 
-    manual_reference_path = manual_reference.strip()
-    if manual_reference_path:
-        selected_reference_paths = [manual_reference_path]
-        reference_mode = "manual_single"
-    else:
-        selected_reference_paths = [row["path"] for row in references[:references_to_use]]
-        reference_mode = "sqlite_by_word"
-
     try:
-        missing_references = [path for path in selected_reference_paths if not Path(path).exists()]
         att_exists = Path(resolved_attempt_path).exists()
 
-        if not selected_reference_paths:
-            st.error("Не удалось выбрать эталоны: укажите путь вручную или найдите эталоны по слову")
-        elif missing_references or not att_exists:
-            st.error("Проверьте пути: выбранные эталоны и аудио пользователя должны существовать")
-            if missing_references:
-                st.write({"отсутствующие_эталоны": missing_references})
+        if not att_exists:
+            st.error("Путь к аудио пользователя не существует")
+        elif not anchor_set.has_required_anchors:
+            st.error(
+                "Нельзя запустить анализ: для слова отсутствуют обязательные якоря. "
+                "Проверьте data/ref."
+            )
         else:
-            with st.spinner("Загружаю wav2vec2 и считаю эмбеддинги..."):
+            with st.spinner("Загружаю wav2vec2 и считаю якорную калибровку..."):
                 try:
                     resolved_hf_token = resolve_hf_token(hf_token.strip() or None)
                     result = analyze(
                         user_audio_path=resolved_attempt_path,
-                        reference_audio_path=selected_reference_paths,
                         transcript=transcript,
                         similarity="cosine",
                         model_name=model_name.strip() or DEFAULT_MODEL_NAME,
@@ -170,21 +172,22 @@ if st.button("Запустить MVP", type="primary"):
                         hf_token=resolved_hf_token,
                         sakoe_chiba_radius=int(sakoe_chiba_radius),
                         use_vosk=use_vosk,
+                        raw_distance_alpha=float(raw_distance_alpha),
+                        max_anchors_per_class=max_anchors_preview,
                     )
                 except Exception as exc:
                     st.error(f"Ошибка при анализе: {exc}")
                 else:
                     st.success("MVP выполнен")
                     result_payload = {
-                        "reference_mode": reference_mode,
-                        "reference_word": reference_word.strip(),
-                        "reference_paths": selected_reference_paths,
-                        "reference_count": len(selected_reference_paths),
+                        "word": anchor_word,
+                        "anchors": anchor_stats,
                         "attempt_exists": att_exists,
                         "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
                         "attempt_path_used": resolved_attempt_path,
                         "transcript": transcript,
                         "sakoe_chiba_radius": int(sakoe_chiba_radius),
+                        "raw_distance_alpha": float(raw_distance_alpha),
                         "use_vosk": use_vosk,
                         "metric": result.metric,
                         "model_name": result.model_name,
@@ -194,6 +197,9 @@ if st.button("Запустить MVP", type="primary"):
                         "reason": result.reason,
                         "embedding_similarity": result.similarity,
                         "temporal_distance": result.temporal_distance,
+                        "raw_distance": result.raw_distance,
+                        "d100": result.d100,
+                        "d0": result.d0,
                     }
 
                     verdict_ru = _verdict_to_russian(result.verdict)
@@ -207,7 +213,8 @@ if st.button("Запустить MVP", type="primary"):
                     with metric_col_3:
                         st.metric("Сходство эмбеддингов", f"{result.similarity:.4f}")
                     with metric_col_4:
-                        st.metric("Временная дистанция", f"{result.temporal_distance:.4f}")
+                        temporal_text = "∞" if result.temporal_distance == float("inf") else f"{result.temporal_distance:.4f}"
+                        st.metric("Временная дистанция", temporal_text)
 
                     st.progress(int(max(0, min(100, round(result.pronunciation_score)))))
                     if result.status == "empty_audio":
@@ -231,7 +238,7 @@ if st.button("Запустить MVP", type="primary"):
                         if result.reason:
                             st.caption(result.reason)
                     elif result.status == "invalid_reference":
-                        st.error("Не удалось выполнить анализ: эталонные записи не заданы.")
+                        st.error("Не удалось выполнить анализ: для слова не собраны корректные якоря.")
                         if result.reason:
                             st.caption(result.reason)
                     else:
@@ -245,6 +252,14 @@ if st.button("Запустить MVP", type="primary"):
                         st.markdown("**Метрика**")
                         st.info(result.metric)
 
+                    with st.expander("Калибровка"):
+                        st.write({
+                            "d100": result.d100,
+                            "d0": result.d0,
+                            "raw_distance": result.raw_distance,
+                            "alpha": raw_distance_alpha,
+                        })
+
                     with st.expander("DEBUG"):
                         st.write(result_payload)
     finally:
@@ -253,4 +268,3 @@ if st.button("Запустить MVP", type="primary"):
                 Path(tmp_path).unlink(missing_ok=True)
             except OSError:
                 pass
-

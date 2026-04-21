@@ -131,4 +131,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app", "app.*", "asr", "asr.*", "classic_approach", "classic_approach.*", "neural_approach", "neural_approach.*"]
+include = ["app", "app.*", "asr", "asr.*", "classic_approach", "classic_approach.*", "neural_approach", "neural_approach.*", "scoring", "scoring.*"]

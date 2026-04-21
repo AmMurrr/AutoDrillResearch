@@ -3,7 +3,7 @@ from tempfile import NamedTemporaryFile
 
 import streamlit as st
 from classic_approach.pipeline import analyze
-from app.reference_db import init_db, list_reference_paths
+from scoring.anchor_calibration import describe_anchor_set, get_word_anchor_set, list_anchor_words, normalize_word
 
 
 def _parse_word_mismatch_reason(reason: str) -> tuple[str, str]:
@@ -31,43 +31,44 @@ def _render_verdict_block(verdict: str) -> None:
 
 
 st.title("Классический MVP")
-init_db()
-
-
-
 
 st.markdown("### Входные данные")
-transcript = st.text_input("Ожидаемый текст фразы", value="Hello")
+transcript = st.text_input("Ожидаемое слово", value="happy")
+anchor_word = normalize_word(transcript)
 
-default_word = transcript.strip().lower()
-reference_word = st.text_input("Слово для поиска эталонов в SQLite", value=default_word)
-
-references = list_reference_paths(word=reference_word.strip())
-if references:
-    st.caption(f"Найдено эталонов по слову '{reference_word.strip()}': {len(references)}")
-    st.dataframe(
-        [{"word": row["word"], "path": row["path"], "created_at": row["created_at"]} for row in references],
-        use_container_width=True,
-        hide_index=True,
-    )
-    if len(references) == 1:
-        references_to_use = 1
-        st.caption("Доступен один эталон: он будет использован автоматически.")
-    else:
-        references_to_use = st.slider(
-            "Сколько эталонов использовать в алгоритме",
-            min_value=1,
-            max_value=len(references),
-            value=min(3, len(references)),
-        )
-else:
-    st.info("По этому слову эталоны в БД не найдены")
-    references_to_use = 0
-
-manual_reference = st.text_input(
-    "Или укажите путь вручную (используется только один эталон)",
-    value="",
+max_anchors_preview = st.slider(
+    "Якорей на класс (лимит для калибровки)",
+    min_value=1,
+    max_value=30,
+    value=12,
 )
+
+anchor_set = get_word_anchor_set(
+    word=anchor_word,
+    max_anchors_per_class=max_anchors_preview,
+)
+anchor_stats = describe_anchor_set(anchor_set)
+
+available_words = list_anchor_words()
+if available_words:
+    st.caption("Слова с perfect-якорями в data/ref: " + ", ".join(available_words))
+else:
+    st.warning("В data/ref не найдены папки вида word_perfect с аудио")
+
+if anchor_set.has_required_anchors:
+    st.success(
+        "Якоря для слова готовы: "
+        f"perfect={anchor_stats['perfect']}, "
+        f"wrong={anchor_stats['wrong']}, "
+        f"moderate={anchor_stats['moderate']}, "
+        f"empty_word={anchor_stats['empty_word']}"
+    )
+else:
+    st.warning(
+        "Для выбранного слова не хватает якорей. "
+        "Нужны папки word_perfect и хотя бы один zero-класс "
+        "(word_wrong / word_moderate / _empty_word)."
+    )
 
 attempt_path = st.text_input(
     "Путь к аудио пользователя",
@@ -118,41 +119,32 @@ if st.button("Запустить MVP", type="primary"):
             tmp_path = tmp.name
         resolved_attempt_path = tmp_path
 
-    manual_reference_path = manual_reference.strip()
-    if manual_reference_path:
-        selected_reference_paths = [manual_reference_path]
-        reference_mode = "manual_single"
-    else:
-        selected_reference_paths = [row["path"] for row in references[:references_to_use]]
-        reference_mode = "sqlite_by_word"
-
     try:
-        missing_references = [path for path in selected_reference_paths if not Path(path).exists()]
         att_exists = Path(resolved_attempt_path).exists()
 
-        if not selected_reference_paths:
-            st.error("Не удалось выбрать эталоны: укажите путь вручную или найдите эталоны по слову")
-        elif missing_references or not att_exists:
-            st.error("Проверьте пути: выбранные эталоны и аудио пользователя должны существовать")
-            if missing_references:
-                st.write({"отсутствующие_эталоны": missing_references})
+        if not att_exists:
+            st.error("Путь к аудио пользователя не существует")
+        elif not anchor_set.has_required_anchors:
+            st.error(
+                "Нельзя запустить анализ: для слова отсутствуют обязательные якоря. "
+                "Проверьте data/ref."
+            )
         else:
             result = analyze(
                 user_audio_path=resolved_attempt_path,
-                reference_audio_path=selected_reference_paths,
                 transcript=transcript,
                 n_mfcc=n_mfcc,
                 frame_ms=frame_ms,
                 hop_ms=hop_ms,
                 sakoe_chiba_radius=int(sakoe_chiba_radius),
                 use_vosk=use_vosk,
+                max_anchors_per_class=max_anchors_preview,
             )
+
             st.success("MVP выполнен")
             result_payload = {
-                "режим_выбора_эталонов": reference_mode,
-                "слово_поиска": reference_word.strip(),
-                "использованные_эталоны": selected_reference_paths,
-                "количество_эталонов": len(selected_reference_paths),
+                "слово": anchor_word,
+                "anchors": anchor_stats,
                 "попытка_найдена": att_exists,
                 "режим_ввода": "аудио_из_streamlit" if audio_source is not None else "путь_вручную",
                 "использованный_путь_попытки": resolved_attempt_path,
@@ -166,6 +158,8 @@ if st.button("Запустить MVP", type="primary"):
                 "status": result.status,
                 "reason": result.reason,
                 "dtw_дистанция": result.distance,
+                "d100": result.d100,
+                "d0": result.d0,
             }
 
             st.markdown("### Результат")
@@ -200,11 +194,14 @@ if st.button("Запустить MVP", type="primary"):
                 if result.reason:
                     st.caption(result.reason)
             elif result.status == "invalid_reference":
-                st.error("Не удалось выполнить анализ: эталонные записи не заданы.")
+                st.error("Не удалось выполнить анализ: для слова не собраны корректные якоря.")
                 if result.reason:
                     st.caption(result.reason)
             else:
                 _render_verdict_block(result.verdict)
+
+            with st.expander("Калибровка"):
+                st.write({"d100": result.d100, "d0": result.d0})
 
             with st.expander("DEBUG"):
                 st.write(result_payload)
@@ -214,5 +211,3 @@ if st.button("Запустить MVP", type="primary"):
                 Path(tmp_path).unlink(missing_ok=True)
             except OSError:
                 pass
-
-

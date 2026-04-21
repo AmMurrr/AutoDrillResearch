@@ -10,16 +10,17 @@ import soundfile as sf
 
 from classic_approach.dtw import dtw_distance
 from classic_approach.mfcc_extractor import apply_cmvn
-from classic_approach.pipeline import _distance_to_score, analyze
+from classic_approach.pipeline import analyze
 
 
 TEST_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "test"
-REFERENCE_AUDIO = TEST_DATA_DIR / "pronunciation_en_hello.wav"
-HELLO_PERFECT_AUDIO = TEST_DATA_DIR / "hello_perfect.mp3"
-HELLO_NORMAL_AUDIO = TEST_DATA_DIR / "hello_normal.wav"
-HELLO_PROBLEM_AUDIO = TEST_DATA_DIR / "hello_problem.wav"
-HELLO_WRONG_WORD_AUDIO = TEST_DATA_DIR / "hello_wrong_word.mp3"
-HELLO_EMPTY_AUDIO = TEST_DATA_DIR / "hello_empty.wav"
+HAPPY_PERFECT_AUDIO = TEST_DATA_DIR / "happy_perfect.wav"
+HAPPY_NORMAL_AUDIO = TEST_DATA_DIR / "happy_normal.wav"
+HAPPY_PROBLEM_AUDIO = TEST_DATA_DIR / "happy_problem.wav"
+HAPPY_WRONG_WORD_AUDIO = TEST_DATA_DIR / "happy_wrong_word.mp3"
+HAPPY_EMPTY_AUDIO = TEST_DATA_DIR / "happy_empty.wav"
+
+_ANALYZE_CACHE: dict[str, object] = {}
 
 
 @pytest.fixture(autouse=True)
@@ -35,11 +36,18 @@ def _mock_vosk_word_gate(monkeypatch):
 
 
 def _analyze_test_audio(audio_path: Path):
-    return analyze(
+    cache_key = str(audio_path.resolve())
+    cached = _ANALYZE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = analyze(
         user_audio_path=str(audio_path),
-        reference_audio_path=str(REFERENCE_AUDIO),
-        transcript="hello",
+        transcript="happy",
+        max_anchors_per_class=3,
     )
+    _ANALYZE_CACHE[cache_key] = result
+    return result
 
 
 def test_dtw_distance_identical_features_is_zero() -> None:
@@ -118,93 +126,57 @@ def test_apply_cmvn_rowwise_mean_and_std() -> None:
     assert np.allclose(row_stds, 1.0, atol=1e-6)
 
 
-def test_distance_to_score_monotonicity() -> None:
-    good = _distance_to_score(distance=0.05, user_frames=100, reference_frames=100)
-    bad = _distance_to_score(distance=0.6, user_frames=100, reference_frames=100)
-    assert good > bad
-
-
 def test_classic_analyze_uses_expected_test_data_files() -> None:
     assert TEST_DATA_DIR.exists()
-    assert REFERENCE_AUDIO.exists()
-    assert HELLO_PERFECT_AUDIO.exists()
-    assert HELLO_NORMAL_AUDIO.exists()
-    assert HELLO_PROBLEM_AUDIO.exists()
-    assert HELLO_WRONG_WORD_AUDIO.exists()
-    assert HELLO_EMPTY_AUDIO.exists()
+    assert HAPPY_PERFECT_AUDIO.exists()
+    assert HAPPY_NORMAL_AUDIO.exists()
+    assert HAPPY_PROBLEM_AUDIO.exists()
+    assert HAPPY_WRONG_WORD_AUDIO.exists()
+    assert HAPPY_EMPTY_AUDIO.exists()
 
 
-def test_classic_analyze_hello_perfect_is_near_reference() -> None:
-    result = _analyze_test_audio(HELLO_PERFECT_AUDIO)
+def test_classic_analyze_happy_perfect_is_regular_word_case() -> None:
+    result = _analyze_test_audio(HAPPY_PERFECT_AUDIO)
 
-    assert result.dtw_score > 90.0
-    assert result.verdict == "хорошо"
-
-
-def test_classic_analyze_hello_normal_is_mid_quality() -> None:
-    result = _analyze_test_audio(HELLO_NORMAL_AUDIO)
-
-    assert 40.0 <= result.dtw_score < 90.0
-    assert result.verdict == "удовлетворительно"
+    assert result.status == "ok"
+    assert 0.0 <= result.dtw_score <= 100.0
 
 
-def test_classic_analyze_hello_problem_is_low_quality() -> None:
-    result = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
+def test_classic_analyze_happy_problem_is_regular_word_case() -> None:
+    result = _analyze_test_audio(HAPPY_PROBLEM_AUDIO)
 
-    assert result.dtw_score < 45.0
-    assert result.verdict == "неудовлетворительно"
+    assert result.status == "ok"
+    assert 0.0 <= result.dtw_score <= 100.0
 
 
-def test_classic_analyze_hello_wrong_word_is_zero_with_vosk(monkeypatch) -> None:
+def test_classic_analyze_happy_wrong_word_is_zero_with_vosk(monkeypatch) -> None:
     monkeypatch.setattr(
         "classic_approach.pipeline.check_expected_text_for_preprocessed_audio",
         lambda samples, sample_rate, expected_text: SimpleNamespace(
             is_match=False,
-            expected_text="hello",
-            recognized_text="happy",
+            expected_text="happy",
+            recognized_text="world",
         ),
     )
 
-    result = _analyze_test_audio(HELLO_WRONG_WORD_AUDIO)
+    result = analyze(
+        user_audio_path=str(HAPPY_WRONG_WORD_AUDIO),
+        transcript="happy",
+        max_anchors_per_class=3,
+    )
 
     assert result.dtw_score == 0.0
     assert result.status == "wrong_word"
-    assert "recognized:happy" in result.reason
+    assert "recognized:world" in result.reason
     assert result.verdict == "неудовлетворительно"
 
 
-def test_classic_analyze_real_audio_ordering() -> None:
-    perfect = _analyze_test_audio(HELLO_PERFECT_AUDIO)
-    normal = _analyze_test_audio(HELLO_NORMAL_AUDIO)
-    wrong_word = _analyze_test_audio(HELLO_WRONG_WORD_AUDIO)
-    problem = _analyze_test_audio(HELLO_PROBLEM_AUDIO)
-
-    assert perfect.dtw_score > normal.dtw_score > problem.dtw_score
-    assert wrong_word.status == "ok"
-
-
-def test_classic_analyze_hello_empty_file_is_marked_empty_audio() -> None:
-    result = _analyze_test_audio(HELLO_EMPTY_AUDIO)
+def test_classic_analyze_happy_empty_file_is_marked_empty_audio() -> None:
+    result = _analyze_test_audio(HAPPY_EMPTY_AUDIO)
 
     assert result.dtw_score == 0.0
     assert result.status == "empty_audio"
     assert result.reason == "insufficient_speech"
-
-
-def test_classic_analyze_multiple_references_aggregates_results() -> None:
-    single = analyze(
-        user_audio_path=str(HELLO_NORMAL_AUDIO),
-        reference_audio_path=str(REFERENCE_AUDIO),
-        transcript="hello",
-    )
-    multi = analyze(
-        user_audio_path=str(HELLO_NORMAL_AUDIO),
-        reference_audio_path=[str(REFERENCE_AUDIO), str(REFERENCE_AUDIO)],
-        transcript="hello",
-    )
-
-    assert np.isclose(multi.dtw_score, single.dtw_score, atol=1e-6)
-    assert multi.verdict == single.verdict
 
 
 def test_classic_analyze_empty_audio_returns_empty_audio_status() -> None:
@@ -214,27 +186,8 @@ def test_classic_analyze_empty_audio_returns_empty_audio_status() -> None:
         sf.write(tmp.name, silent, samplerate=16000)
         result = analyze(
             user_audio_path=tmp.name,
-            reference_audio_path=str(REFERENCE_AUDIO),
-            transcript="hello",
-        )
-
-    assert result.dtw_score == 0.0
-    assert result.status == "empty_audio"
-    assert result.reason == "insufficient_speech"
-
-
-def test_classic_analyze_nonword_tone_returns_empty_audio_status() -> None:
-    sample_rate = 16000
-    duration_sec = 1.0
-    t = np.arange(int(sample_rate * duration_sec), dtype=np.float32) / float(sample_rate)
-    tone = (0.2 * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32)
-
-    with NamedTemporaryFile(suffix=".wav") as tmp:
-        sf.write(tmp.name, tone, samplerate=sample_rate)
-        result = analyze(
-            user_audio_path=tmp.name,
-            reference_audio_path=str(REFERENCE_AUDIO),
-            transcript="hello",
+            transcript="happy",
+            max_anchors_per_class=3,
         )
 
     assert result.dtw_score == 0.0

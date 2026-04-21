@@ -2,21 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-
-def _distance_to_score(distance: float, user_frames: int, reference_frames: int) -> float:
-    DISTANCE_MID = 0.25
-    SHAPE = 20.0
-    base_score = 100.0 / (1.0 + (max(distance, 0.0) / DISTANCE_MID) ** SHAPE)
-
-    frame_ratio = max(user_frames, reference_frames) / max(1, min(user_frames, reference_frames))
-    log_ratio = abs(np.log(frame_ratio))
-    duration_penalty = np.exp(-0.8 * (log_ratio**2))
-
-    # Дополнительный штраф для очень длинных попыток (частый признак нецелевой речи).
-    long_utterance_penalty = np.exp(-0.35 * max(frame_ratio - 3.0, 0.0))
-    duration_penalty = float(np.clip(duration_penalty * long_utterance_penalty, 0.0, 1.0))
-
-    return float(np.clip(base_score * duration_penalty, 0.0, 100.0))
+from scoring.anchor_calibration import SigmoidCalibrationParams, sigmoid_score
 
 
 def _verdict_from_score(score: float) -> str:
@@ -51,6 +37,8 @@ class ScoringResult:
     distance: float
     status: str = "ok"
     reason: str = ""
+    d100: float | None = None
+    d0: float | None = None
 
 
 def ComputeScoringResult(
@@ -58,12 +46,55 @@ def ComputeScoringResult(
     distance: float,
     status: str = "ok",
     reason: str = "",
+    d100: float | None = None,
+    d0: float | None = None,
 ) -> ScoringResult:
-    return _build_scoring_result(
+    result = _build_scoring_result(
         score=float(dtw_score),
         distance=distance,
         status=status,
         reason=reason,
+    )
+    result.d100 = d100
+    result.d0 = d0
+    return result
+
+
+def compute_calibrated_scoring_result(
+    distance: float,
+    calibration_params: SigmoidCalibrationParams,
+    status: str = "ok",
+    reason: str = "",
+    force_zero: bool = False,
+) -> ScoringResult:
+    if status != "ok":
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float(distance),
+            status=status,
+            reason=reason,
+            d100=calibration_params.d100,
+            d0=calibration_params.d0,
+        )
+
+    if force_zero or not np.isfinite(distance):
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float(distance),
+            status=status,
+            reason=reason,
+            d100=calibration_params.d100,
+            d0=calibration_params.d0,
+        )
+
+    calibrated_score = sigmoid_score(float(distance), calibration_params)
+    return ComputeScoringResult(
+        dtw_score=calibrated_score,
+        distance=float(distance),
+        status=status,
+        reason=reason,
+        d100=calibration_params.d100,
+        d0=calibration_params.d0,
     )
 
 
@@ -73,27 +104,23 @@ def compute_scoring_result_from_distance(
     reference_frames: int,
     status: str = "ok",
     reason: str = "",
+    calibration_params: SigmoidCalibrationParams | None = None,
 ) -> ScoringResult:
-    if status != "ok":
-        return ComputeScoringResult(
-            dtw_score=0.0,
-            distance=float(distance),
-            status=status,
-            reason=reason,
+    del user_frames
+    del reference_frames
+
+    if calibration_params is None:
+        calibration_params = SigmoidCalibrationParams(
+            d100=0.15,
+            d0=0.45,
+            a=25.944166,
+            b=0.30,
+            epsilon=0.02,
         )
 
-    if not np.isfinite(distance):
-        return ComputeScoringResult(
-            dtw_score=0.0,
-            distance=float("inf"),
-            status=status,
-            reason=reason,
-        )
-
-    dtw_score = _distance_to_score(float(distance), int(user_frames), int(reference_frames))
-    return ComputeScoringResult(
-        dtw_score=dtw_score,
-        distance=float(distance),
+    return compute_calibrated_scoring_result(
+        distance=distance,
+        calibration_params=calibration_params,
         status=status,
         reason=reason,
     )
