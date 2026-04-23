@@ -3,8 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from app.logging_config import get_logger
 
-from scoring.anchor_calibration import SigmoidCalibrationParams, sigmoid_score
+from scoring.anchor_calibration import (
+    AnchorDistanceProfile,
+    MultiAnchorSigmoidParams,
+    SigmoidCalibrationParams,
+    score_from_anchor_profile,
+    sigmoid_score,
+)
+
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -20,6 +30,8 @@ class ScoringResult:
 	raw_distance: float = float("inf")
 	d100: float | None = None
 	d0: float | None = None
+	moderate_raw_distance: float | None = None
+	fail_raw_distance: float | None = None
 
 
 def _verdict_from_score(score: float) -> str:
@@ -41,6 +53,8 @@ def _build_scoring_result(
 	raw_distance: float = float("inf"),
 	d100: float | None = None,
 	d0: float | None = None,
+	moderate_raw_distance: float | None = None,
+	fail_raw_distance: float | None = None,
 ) -> ScoringResult:
 	clipped_score = float(np.clip(float(pronunciation_score), 0.0, 100.0))
 	metric_key = metric.strip().lower()
@@ -56,6 +70,8 @@ def _build_scoring_result(
 		raw_distance=float(raw_distance),
 		d100=d100,
 		d0=d0,
+		moderate_raw_distance=moderate_raw_distance,
+		fail_raw_distance=fail_raw_distance,
 	)
 
 
@@ -116,6 +132,7 @@ def compute_calibrated_scoring_result(
 	force_zero: bool = False,
 ) -> ScoringResult:
 	if status != "ok":
+		logger.warning("Neural scoring forced to zero because status=%s", status)
 		return _build_scoring_result(
 			pronunciation_score=0.0,
 			similarity=float(similarity),
@@ -130,6 +147,7 @@ def compute_calibrated_scoring_result(
 		)
 
 	if force_zero or not np.isfinite(raw_distance):
+		logger.warning("Neural scoring forced to zero (force_zero=%s, raw_distance=%s)", force_zero, raw_distance)
 		return _build_scoring_result(
 			pronunciation_score=0.0,
 			similarity=float(similarity),
@@ -144,6 +162,7 @@ def compute_calibrated_scoring_result(
 		)
 
 	score = sigmoid_score(float(raw_distance), calibration_params)
+	logger.info("Neural scoring calibrated: raw_distance=%.6f score=%.2f", float(raw_distance), score)
 	return _build_scoring_result(
 		pronunciation_score=score,
 		similarity=float(similarity),
@@ -155,6 +174,74 @@ def compute_calibrated_scoring_result(
 		raw_distance=float(raw_distance),
 		d100=calibration_params.d100,
 		d0=calibration_params.d0,
+	)
+
+
+def compute_anchor_profile_calibrated_scoring_result(
+	similarity: float,
+	temporal_distance: float,
+	metric: str,
+	model_name: str,
+	profile: AnchorDistanceProfile,
+	calibration_params: MultiAnchorSigmoidParams,
+	status: str = "ok",
+	reason: str = "",
+) -> ScoringResult:
+	if status != "ok":
+		logger.warning("Neural multi-anchor scoring forced to zero because status=%s", status)
+		return _build_scoring_result(
+			pronunciation_score=0.0,
+			similarity=float(similarity),
+			temporal_distance=float(temporal_distance),
+			metric=metric,
+			model_name=model_name,
+			status=status,
+			reason=reason,
+			raw_distance=float(profile.perfect_distance),
+			d100=calibration_params.d100,
+			d0=calibration_params.d0,
+			moderate_raw_distance=profile.moderate_distance,
+			fail_raw_distance=profile.fail_distance,
+		)
+
+	if not profile.is_valid:
+		logger.warning("Neural multi-anchor scoring got invalid profile: %s", profile)
+		return _build_scoring_result(
+			pronunciation_score=0.0,
+			similarity=float(similarity),
+			temporal_distance=float(temporal_distance),
+			metric=metric,
+			model_name=model_name,
+			status="invalid_reference",
+			reason="invalid_anchor_profile",
+			raw_distance=float(profile.perfect_distance),
+			d100=calibration_params.d100,
+			d0=calibration_params.d0,
+			moderate_raw_distance=profile.moderate_distance,
+			fail_raw_distance=profile.fail_distance,
+		)
+
+	score = score_from_anchor_profile(profile, calibration_params)
+	logger.info(
+		"Neural multi-anchor scoring calibrated: perfect=%.6f moderate=%.6f fail=%.6f score=%.2f",
+		float(profile.perfect_distance),
+		float(profile.moderate_distance),
+		float(profile.fail_distance),
+		score,
+	)
+	return _build_scoring_result(
+		pronunciation_score=score,
+		similarity=float(similarity),
+		temporal_distance=float(temporal_distance),
+		metric=metric,
+		model_name=model_name,
+		status=status,
+		reason=reason,
+		raw_distance=float(profile.perfect_distance),
+		d100=calibration_params.d100,
+		d0=calibration_params.d0,
+		moderate_raw_distance=profile.moderate_distance,
+		fail_raw_distance=profile.fail_distance,
 	)
 
 
@@ -193,6 +280,7 @@ def compute_scoring_result(
 
 def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 	if not results:
+		logger.warning("Neural scoring aggregation got empty results")
 		return _build_scoring_result(
 			pronunciation_score=0.0,
 			similarity=0.0,
@@ -215,6 +303,13 @@ def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 	]
 	aggregated_temporal_distance = (
 		float(np.mean(finite_temporal_distances)) if finite_temporal_distances else float("inf")
+	)
+
+	logger.info(
+		"Neural scoring aggregated %s results: score=%.2f raw_distance=%s",
+		len(results),
+		aggregated_score,
+		aggregated_raw_distance,
 	)
 
 	first_result = results[0]

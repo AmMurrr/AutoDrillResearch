@@ -3,7 +3,12 @@ from tempfile import NamedTemporaryFile
 
 import streamlit as st
 from classic_approach.pipeline import analyze
+from app.logging_config import get_logger
 from scoring.anchor_calibration import describe_anchor_set, get_word_anchor_set, list_anchor_words, normalize_word
+
+
+logger = get_logger(__name__)
+logger.info("Opened Streamlit page: Classic Approach MVP")
 
 
 def _parse_word_mismatch_reason(reason: str) -> tuple[str, str]:
@@ -59,15 +64,15 @@ if anchor_set.has_required_anchors:
     st.success(
         "Якоря для слова готовы: "
         f"perfect={anchor_stats['perfect']}, "
-        f"wrong={anchor_stats['wrong']}, "
+        f"fail={anchor_stats['fail']}, "
         f"moderate={anchor_stats['moderate']}, "
         f"empty_word={anchor_stats['empty_word']}"
     )
 else:
     st.warning(
         "Для выбранного слова не хватает якорей. "
-        "Нужны папки word_perfect и хотя бы один zero-класс "
-        "(word_wrong / word_moderate / _empty_word)."
+        "Нужны папки word_perfect и хотя бы один fail-класс "
+        "(word_fail / word_moderate)."
     )
 
 attempt_path = st.text_input(
@@ -111,6 +116,12 @@ if st.button("Запустить MVP", type="primary"):
     audio_source = recorded_attempt if recorded_attempt is not None else uploaded_attempt
     tmp_path = None
     resolved_attempt_path = attempt_path.strip()
+    logger.info(
+        "Classic page run requested: transcript='%s' use_vosk=%s input_mode=%s",
+        transcript,
+        use_vosk,
+        "streamlit_audio" if audio_source is not None else "manual_path",
+    )
 
     if audio_source is not None:
         suffix = Path(audio_source.name).suffix or ".wav"
@@ -123,8 +134,10 @@ if st.button("Запустить MVP", type="primary"):
         att_exists = Path(resolved_attempt_path).exists()
 
         if not att_exists:
+            logger.warning("Classic page run rejected: attempt path does not exist (%s)", resolved_attempt_path)
             st.error("Путь к аудио пользователя не существует")
         elif not anchor_set.has_required_anchors:
+            logger.warning("Classic page run rejected: anchors are incomplete for word '%s'", anchor_word)
             st.error(
                 "Нельзя запустить анализ: для слова отсутствуют обязательные якоря. "
                 "Проверьте data/ref."
@@ -139,6 +152,13 @@ if st.button("Запустить MVP", type="primary"):
                 sakoe_chiba_radius=int(sakoe_chiba_radius),
                 use_vosk=use_vosk,
                 max_anchors_per_class=max_anchors_preview,
+            )
+
+            logger.info(
+                "Classic page analysis finished: status=%s score=%.2f verdict=%s",
+                result.status,
+                result.dtw_score,
+                result.verdict,
             )
 
             st.success("MVP выполнен")

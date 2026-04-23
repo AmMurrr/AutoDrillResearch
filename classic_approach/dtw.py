@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import dtaidistance.dtw_ndim as dtw_ndim
 import numpy as np
+from app.logging_config import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def _resolve_window(sakoe_chiba_radius: int | None) -> int | None:
@@ -30,6 +34,7 @@ def dtw_distance(
 
     n, m = seq_a.shape[0], seq_b.shape[0]
     if n == 0 or m == 0:
+        logger.warning("Classic DTW got empty sequence (n=%s, m=%s)", n, m)
         return float("inf")
 
     # Многомерное DTW расстояние с нормализацией по длине и размерности признаков
@@ -39,5 +44,7 @@ def dtw_distance(
     window = _resolve_window(sakoe_chiba_radius)
 
     distance = float(dtw_ndim.distance(seq_a_nd, seq_b_nd, window=window))
-   
-    return distance / (max(n, m) * np.sqrt(feature_dim))
+
+    normalized = distance / (max(n, m) * np.sqrt(feature_dim))
+    logger.debug("Classic DTW distance computed: %.6f", normalized)
+    return normalized

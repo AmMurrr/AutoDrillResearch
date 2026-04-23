@@ -1,4 +1,5 @@
 import streamlit as st
+from app.logging_config import get_logger
 
 from app.reference_db import (
     DB_PATH,
@@ -10,6 +11,10 @@ from app.reference_db import (
     list_reference_words,
     scan_reference_dir,
 )
+
+
+logger = get_logger(__name__)
+logger.info("Opened Streamlit page: Reference DB")
 
 st.title("Reference DB")
 st.caption("SQLite-хранилище путей к эталонным записям")
@@ -27,6 +32,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     if st.button("Сканировать data/reference", type="primary"):
+        logger.info("Reference DB page: scan button clicked")
         added_count = scan_reference_dir()
         st.success(f"Сканирование завершено. Добавлено новых записей: {added_count}")
 
@@ -41,6 +47,7 @@ manual_path = st.text_input("Путь к эталонному аудио", value
 manual_label = st.text_input("Метка (необязательно)", value="")
 
 if st.button("Добавить путь"):
+    logger.info("Reference DB page: manual add requested for word='%s'", manual_word)
     if add_reference_path(manual_word, manual_path, manual_label):
         st.success("Путь добавлен в БД")
     else:
@@ -70,6 +77,7 @@ else:
     )
     if st.button("Удалить выбранную запись"):
         reference_id = int(delete_choice.split("|", maxsplit=1)[0].strip())
+        logger.info("Reference DB page: delete requested for id=%s", reference_id)
         if delete_reference_path(reference_id):
             st.success("Запись удалена")
         else:

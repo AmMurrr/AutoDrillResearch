@@ -2,6 +2,10 @@
 
 import librosa
 import numpy as np
+from app.logging_config import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def apply_cmvn(mfcc: np.ndarray, eps: float = 1e-8) -> np.ndarray:
@@ -23,6 +27,10 @@ def extract_mfcc(
 	hop_ms: int = 10,
 	use_cmvn: bool = True,
 ) -> np.ndarray:
+	if np.asarray(samples).size == 0:
+		logger.warning("MFCC extraction got empty samples")
+		return np.zeros((int(n_mfcc), 0), dtype=np.float32)
+
 	win_length = int(sample_rate * (frame_ms / 1000.0))
 	hop_length = int(sample_rate * (hop_ms / 1000.0))
 	n_fft = max(512, int(2 ** np.ceil(np.log2(max(win_length, 1)))))
@@ -35,6 +43,7 @@ def extract_mfcc(
 		hop_length=max(hop_length, 1),
 		win_length=max(win_length, 1),
 	)
+	logger.debug("MFCC extracted: shape=%s n_mfcc=%s", mfcc.shape, n_mfcc)
 
 	if use_cmvn:
 		return apply_cmvn(mfcc)

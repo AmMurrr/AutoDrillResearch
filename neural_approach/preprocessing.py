@@ -4,11 +4,13 @@ from dataclasses import dataclass
 
 import librosa
 import numpy as np
+from app.logging_config import get_logger
 import soundfile as sf
 
 
 TARGET_SAMPLE_RATE = 16000
 TARGET_DBFS = -20.0
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -19,6 +21,7 @@ class PreprocessedAudio:
 
 def load_audio(path: str) -> tuple[np.ndarray, int]:
     samples, sample_rate = sf.read(path, always_2d=False)
+    logger.debug("Loaded audio from %s (sample_rate=%s, shape=%s)", path, sample_rate, np.shape(samples))
     return np.asarray(samples, dtype=np.float32), int(sample_rate)
 
 
@@ -52,9 +55,15 @@ def normalize_loudness(samples: np.ndarray, target_dbfs: float = TARGET_DBFS) ->
 
 
 def preprocess_audio(path: str, target_sr: int = TARGET_SAMPLE_RATE) -> PreprocessedAudio:
+    logger.info("Neural preprocessing started: %s", path)
     samples, sample_rate = load_audio(path)
     samples = to_mono(samples)
     samples = resample_audio(samples, orig_sr=sample_rate, target_sr=target_sr)
     samples = trim_silence(samples)
     samples = normalize_loudness(samples)
+    if samples.size == 0:
+        logger.warning("Neural preprocessing produced empty waveform: %s", path)
+    else:
+        duration_sec = float(samples.size / float(target_sr))
+        logger.info("Neural preprocessing finished: %s (duration_sec=%.3f)", path, duration_sec)
     return PreprocessedAudio(samples=samples.astype(np.float32, copy=False), sample_rate=target_sr)

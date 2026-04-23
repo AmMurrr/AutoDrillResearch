@@ -11,6 +11,7 @@ from tempfile import mkdtemp
 import re
 
 import numpy as np
+from app.logging_config import get_logger
 import requests
 from vosk import KaldiRecognizer, Model, SetLogLevel
 
@@ -28,6 +29,7 @@ _TOKEN_RE = re.compile(r"[a-z0-9']+")
 _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE: Model | None = None
 _MODEL_PATH_CACHE: Path | None = None
+logger = get_logger(__name__)
 
 
 try:
@@ -65,10 +67,12 @@ def _extract_text(result_payload: str) -> str:
 
 def _resolve_model_base_dir(model_base_dir: str | Path | None = None) -> Path:
 	if model_base_dir is not None:
+		logger.debug("Using explicit Vosk model base dir: %s", model_base_dir)
 		return Path(model_base_dir).expanduser().resolve()
 
 	env_model_dir = os.environ.get(VOSK_MODEL_DIR_ENV_VAR, "").strip()
 	if env_model_dir:
+		logger.debug("Using Vosk model dir from environment: %s", env_model_dir)
 		return Path(env_model_dir).expanduser().resolve()
 
 	return DEFAULT_MODEL_BASE_DIR.resolve()
@@ -81,6 +85,7 @@ def _resolve_model_path(model_base_dir: str | Path | None = None) -> Path:
 
 def _download_model_archive(archive_path: Path) -> None:
 	archive_path.parent.mkdir(parents=True, exist_ok=True)
+	logger.info("Downloading Vosk model archive to %s", archive_path)
 	with requests.get(
 		VOSK_MODEL_ARCHIVE_URL,
 		stream=True,
@@ -91,10 +96,12 @@ def _download_model_archive(archive_path: Path) -> None:
 			for chunk in response.iter_content(chunk_size=1024 * 512):
 				if chunk:
 					archive_file.write(chunk)
+	logger.info("Vosk model archive downloaded: %s", archive_path)
 
 
 def _safe_extract_zip(archive_path: Path, destination: Path) -> None:
 	destination.mkdir(parents=True, exist_ok=True)
+	logger.info("Extracting Vosk archive %s to %s", archive_path, destination)
 	with zipfile.ZipFile(archive_path, mode="r") as zip_file:
 		for member in zip_file.infolist():
 			extracted_path = (destination / member.filename).resolve()
@@ -124,6 +131,7 @@ def _locate_extracted_model_dir(extraction_dir: Path) -> Path:
 def _ensure_model_files(model_base_dir: str | Path | None = None) -> Path:
 	model_path = _resolve_model_path(model_base_dir)
 	if model_path.exists() and model_path.is_dir():
+		logger.debug("Using existing Vosk model dir: %s", model_path)
 		return model_path
 
 	base_dir = model_path.parent
@@ -134,6 +142,7 @@ def _ensure_model_files(model_base_dir: str | Path | None = None) -> Path:
 		try:
 			_download_model_archive(archive_path)
 		except Exception as exc:
+			logger.error("Failed to download Vosk model archive: %s", exc)
 			raise VoskError(
 				f"Failed to download Vosk model archive from {VOSK_MODEL_ARCHIVE_URL}"
 			) from exc
@@ -143,12 +152,14 @@ def _ensure_model_files(model_base_dir: str | Path | None = None) -> Path:
 		try:
 			_safe_extract_zip(archive_path, extraction_root)
 		except Exception as exc:
+			logger.error("Failed to extract Vosk model archive %s: %s", archive_path, exc)
 			raise VoskError(f"Failed to extract Vosk model archive: {archive_path}") from exc
 
 		extracted_model_dir = _locate_extracted_model_dir(extraction_root)
 		if model_path.exists():
 			shutil.rmtree(model_path)
 		shutil.move(str(extracted_model_dir), str(model_path))
+		logger.info("Prepared Vosk model files at %s", model_path)
 	finally:
 		shutil.rmtree(extraction_root, ignore_errors=True)
 
@@ -162,19 +173,23 @@ def get_model(model_base_dir: str | Path | None = None) -> Model:
 	global _MODEL_PATH_CACHE
 
 	if _MODEL_CACHE is not None and _MODEL_PATH_CACHE == model_path:
+		logger.debug("Reusing cached Vosk model: %s", model_path)
 		return _MODEL_CACHE
 
 	with _MODEL_LOCK:
 		if _MODEL_CACHE is not None and _MODEL_PATH_CACHE == model_path:
+			logger.debug("Reusing cached Vosk model inside lock: %s", model_path)
 			return _MODEL_CACHE
 
 		try:
 			loaded_model = Model(str(model_path))
 		except Exception as exc:
+			logger.error("Failed to initialize Vosk model from %s: %s", model_path, exc)
 			raise VoskError(f"Failed to initialize Vosk model from {model_path}") from exc
 
 		_MODEL_CACHE = loaded_model
 		_MODEL_PATH_CACHE = model_path
+		logger.info("Loaded Vosk model: %s", model_path)
 		return loaded_model
 
 
@@ -183,6 +198,7 @@ def transcribe_preprocessed_audio(
 	sample_rate: int,
 	model_base_dir: str | Path | None = None,
 ) -> str:
+	logger.info("Vosk transcription started (sample_rate=%s)", sample_rate)
 	if int(sample_rate) != TARGET_SAMPLE_RATE:
 		raise ValueError(
 			f"Vosk expects sample rate {TARGET_SAMPLE_RATE} Hz, got {sample_rate} Hz"
@@ -195,6 +211,7 @@ def transcribe_preprocessed_audio(
 		raise ValueError("Audio samples must be a 1D (mono) or 2D array")
 
 	if audio.size == 0:
+		logger.warning("Vosk transcription got empty audio")
 		return ""
 
 	clipped = np.clip(audio, -1.0, 1.0)
@@ -217,7 +234,9 @@ def transcribe_preprocessed_audio(
 	if final_text:
 		finalized_parts.append(final_text)
 
-	return normalize_text(" ".join(finalized_parts))
+	normalized = normalize_text(" ".join(finalized_parts))
+	logger.info("Vosk transcription finished: '%s'", normalized)
+	return normalized
 
 
 def compare_with_expected_text(recognized_text: str, expected_text: str) -> TranscriptCheckResult:
@@ -258,12 +277,15 @@ def check_expected_text_for_preprocessed_audio(
 	expected_text: str,
 	model_base_dir: str | Path | None = None,
 ) -> TranscriptCheckResult:
+	logger.info("Checking expected text with Vosk: expected='%s'", normalize_text(expected_text))
 	recognized_text = transcribe_preprocessed_audio(
 		samples=samples,
 		sample_rate=sample_rate,
 		model_base_dir=model_base_dir,
 	)
-	return compare_with_expected_text(
+	result = compare_with_expected_text(
 		recognized_text=recognized_text,
 		expected_text=expected_text,
 	)
+	logger.info("Vosk expected-text check result: match=%s recognized='%s'", result.is_match, result.recognized_text)
+	return result

@@ -5,12 +5,13 @@ from pathlib import Path
 
 import numpy as np
 from asr.vosk import VoskError, check_expected_text_for_preprocessed_audio
+from app.logging_config import get_logger
 from scoring.anchor_calibration import (
+	build_anchor_distance_profile_from_distances,
+	build_anchor_distance_profiles,
 	describe_anchor_set,
-	fit_sigmoid_from_anchor_distances,
+	fit_sigmoid_from_anchor_profiles,
 	get_word_anchor_set,
-	is_known_zero_anchor,
-	median_or_default,
 	normalize_word,
 )
 
@@ -19,7 +20,7 @@ from .input_gate import validate_speech_signal
 from .preprocessing import preprocess_audio
 from .scorer import (
 	ScoringResult,
-	compute_calibrated_scoring_result,
+	compute_anchor_profile_calibrated_scoring_result,
 	compute_raw_distance,
 	compute_scoring_result,
 )
@@ -28,6 +29,7 @@ from .wav2vec_extractor import DEFAULT_MODEL_NAME, extract_wav2vec_embeddings
 
 DEFAULT_MAX_ANCHORS_PER_CLASS = 12
 DEFAULT_RAW_DISTANCE_ALPHA = 0.65
+logger = get_logger(__name__)
 
 
 @lru_cache(maxsize=1024)
@@ -86,10 +88,12 @@ def _collect_valid_anchor_paths(
 				device=device,
 				hf_token=hf_token,
 			)
-		except Exception:
+		except Exception as exc:
+			logger.warning("Skipping anchor %s: failed to extract embeddings (%s)", path, exc)
 			continue
 
 		if int(frame_embeddings.shape[0]) == 0:
+			logger.warning("Skipping anchor %s: no embedding frames", path)
 			continue
 		valid_paths.append(path)
 
@@ -162,6 +166,12 @@ def _build_anchor_calibration(
 	max_anchors_per_class: int,
 	anchor_root: str | None,
 ):
+	logger.info(
+		"Building neural anchor calibration for '%s' (model=%s, max_per_class=%s)",
+		word,
+		model_name,
+		max_anchors_per_class,
+	)
 	anchor_set = get_word_anchor_set(
 		word=word,
 		anchor_root=anchor_root,
@@ -174,8 +184,14 @@ def _build_anchor_calibration(
 		device=device,
 		hf_token=hf_token,
 	)
-	valid_zero_paths = _collect_valid_anchor_paths(
-		paths=anchor_set.zero_paths,
+	valid_moderate_paths = _collect_valid_anchor_paths(
+		paths=anchor_set.moderate_paths,
+		model_name=model_name,
+		device=device,
+		hf_token=hf_token,
+	)
+	valid_fail_paths = _collect_valid_anchor_paths(
+		paths=anchor_set.fail_paths,
 		model_name=model_name,
 		device=device,
 		hf_token=hf_token,
@@ -183,54 +199,54 @@ def _build_anchor_calibration(
 
 	if not valid_perfect_paths:
 		raise ValueError("missing_perfect_anchors")
-	if not valid_zero_paths:
-		raise ValueError("missing_zero_anchors")
+	if not valid_fail_paths:
+		raise ValueError("missing_fail_anchors")
 
-	distances_100: list[float] = []
-	for left_idx in range(len(valid_perfect_paths)):
-		for right_idx in range(left_idx + 1, len(valid_perfect_paths)):
-			distance = _distance_between_anchor_paths(
-				valid_perfect_paths[left_idx],
-				valid_perfect_paths[right_idx],
-				similarity_metric=similarity_metric,
-				model_name=model_name,
-				device=device,
-				hf_token=hf_token,
-				sakoe_chiba_radius=sakoe_chiba_radius,
-				raw_distance_alpha=raw_distance_alpha,
-			)
-			if np.isfinite(distance):
-				distances_100.append(float(distance))
+	distance_cache: dict[tuple[str, str], float] = {}
 
-	if not distances_100:
-		distances_100 = [0.0]
+	def _cached_distance(left_path: str, right_path: str) -> float:
+		key = (left_path, right_path) if left_path <= right_path else (right_path, left_path)
+		cached = distance_cache.get(key)
+		if cached is not None:
+			return cached
 
-	distances_0: list[float] = []
-	for perfect_path in valid_perfect_paths:
-		for zero_path in valid_zero_paths:
-			distance = _distance_between_anchor_paths(
-				perfect_path,
-				zero_path,
-				similarity_metric=similarity_metric,
-				model_name=model_name,
-				device=device,
-				hf_token=hf_token,
-				sakoe_chiba_radius=sakoe_chiba_radius,
-				raw_distance_alpha=raw_distance_alpha,
-			)
-			if np.isfinite(distance):
-				distances_0.append(float(distance))
+		distance = _distance_between_anchor_paths(
+			left_path,
+			right_path,
+			similarity_metric=similarity_metric,
+			model_name=model_name,
+			device=device,
+			hf_token=hf_token,
+			sakoe_chiba_radius=sakoe_chiba_radius,
+			raw_distance_alpha=raw_distance_alpha,
+		)
+		distance_cache[key] = float(distance)
+		return float(distance)
 
-	if not distances_0:
-		raise ValueError("invalid_zero_anchor_distances")
-
-	calibration_params = fit_sigmoid_from_anchor_distances(
-		distances_100=distances_100,
-		distances_0=distances_0,
-		epsilon=0.02,
+	perfect_profiles, moderate_profiles, fail_profiles = build_anchor_distance_profiles(
+		perfect_items=valid_perfect_paths,
+		moderate_items=valid_moderate_paths,
+		fail_items=valid_fail_paths,
+		distance_fn=_cached_distance,
 	)
 
-	return anchor_set, calibration_params, valid_perfect_paths, valid_zero_paths
+	calibration_params = fit_sigmoid_from_anchor_profiles(
+		perfect_profiles=perfect_profiles,
+		moderate_profiles=moderate_profiles,
+		fail_profiles=fail_profiles,
+	)
+
+	logger.info(
+		"Neural calibration ready for '%s': perfect=%s moderate=%s fail=%s d100=%.4f d0=%.4f",
+		word,
+		len(valid_perfect_paths),
+		len(valid_moderate_paths),
+		len(valid_fail_paths),
+		calibration_params.d100,
+		calibration_params.d0,
+	)
+
+	return anchor_set, calibration_params, valid_perfect_paths, valid_moderate_paths, valid_fail_paths
 
 
 def _resolve_similarity_metric(metric: str) -> str:
@@ -253,9 +269,17 @@ def analyze(
 	max_anchors_per_class: int = DEFAULT_MAX_ANCHORS_PER_CLASS,
 	anchor_root: str | None = None,
 ) -> ScoringResult:
+	logger.info(
+		"Neural analyze started: path=%s transcript='%s' model=%s use_vosk=%s",
+		user_audio_path,
+		transcript,
+		model_name,
+		use_vosk,
+	)
 	metric_key = _resolve_similarity_metric(similarity)
 	normalized_word = normalize_word(transcript)
 	if not normalized_word:
+		logger.warning("Neural analyze aborted: empty transcript")
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
@@ -271,6 +295,7 @@ def analyze(
 		sample_rate=user_audio.sample_rate,
 	)
 	if not speech_gate.passed:
+		logger.warning("Neural analyze aborted: speech gate failed")
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
@@ -288,6 +313,7 @@ def analyze(
 				expected_text=transcript,
 			)
 		except (VoskError, ValueError) as exc:
+			logger.error("Neural analyze aborted: Vosk failure (%s)", exc)
 			return compute_scoring_result(
 				similarity=0.0,
 				temporal_distance=float("inf"),
@@ -302,6 +328,7 @@ def analyze(
 				f"recognized:{transcript_check.recognized_text};"
 				f"expected:{transcript_check.expected_text}"
 			)
+			logger.warning("Neural analyze aborted: ASR mismatch (%s)", reason)
 			return compute_scoring_result(
 				similarity=0.0,
 				temporal_distance=float("inf"),
@@ -312,7 +339,13 @@ def analyze(
 			)
 
 	try:
-		anchor_set, calibration_params, valid_perfect_paths, valid_zero_paths = _build_anchor_calibration(
+		(
+			anchor_set,
+			calibration_params,
+			valid_perfect_paths,
+			valid_moderate_paths,
+			valid_fail_paths,
+		) = _build_anchor_calibration(
 			word=normalized_word,
 			similarity_metric=metric_key,
 			model_name=model_name,
@@ -324,6 +357,7 @@ def analyze(
 			anchor_root=anchor_root,
 		)
 	except ValueError as exc:
+		logger.warning("Neural analyze aborted: invalid anchors (%s)", exc)
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
@@ -341,6 +375,7 @@ def analyze(
 		hf_token=hf_token,
 	)
 	if int(user_embeddings.frame_embeddings.shape[0]) == 0:
+		logger.warning("Neural analyze aborted: user embeddings are empty")
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
@@ -374,6 +409,7 @@ def analyze(
 			user_raw_to_perfect.append(float(raw_distance))
 
 	if not user_raw_to_perfect:
+		logger.warning("Neural analyze aborted: no finite distances to perfect anchors")
 		return compute_scoring_result(
 			similarity=0.0,
 			temporal_distance=float("inf"),
@@ -383,58 +419,87 @@ def analyze(
 			reason="invalid_perfect_anchor_distances",
 		)
 
-	user_raw_to_zero: list[float] = []
-	for zero_path in valid_zero_paths:
-		zero_embeddings = _extract_anchor_embeddings(
-			anchor_path=zero_path,
+	user_raw_to_moderate: list[float] = []
+	for moderate_path in valid_moderate_paths:
+		moderate_embeddings = _extract_anchor_embeddings(
+			anchor_path=moderate_path,
 			model_name=model_name,
 			device=device,
 			hf_token=hf_token,
 		)
 		_, raw_distance = _compare_raw_distance(
 			embeddings_a=user_embeddings.frame_embeddings,
-			embeddings_b=zero_embeddings,
+			embeddings_b=moderate_embeddings,
 			similarity_metric=metric_key,
 			sakoe_chiba_radius=sakoe_chiba_radius,
 			raw_distance_alpha=raw_distance_alpha,
 		)
 		if np.isfinite(raw_distance):
-			user_raw_to_zero.append(float(raw_distance))
+			user_raw_to_moderate.append(float(raw_distance))
+
+	user_raw_to_fail: list[float] = []
+	for fail_path in valid_fail_paths:
+		fail_embeddings = _extract_anchor_embeddings(
+			anchor_path=fail_path,
+			model_name=model_name,
+			device=device,
+			hf_token=hf_token,
+		)
+		_, raw_distance = _compare_raw_distance(
+			embeddings_a=user_embeddings.frame_embeddings,
+			embeddings_b=fail_embeddings,
+			similarity_metric=metric_key,
+			sakoe_chiba_radius=sakoe_chiba_radius,
+			raw_distance_alpha=raw_distance_alpha,
+		)
+		if np.isfinite(raw_distance):
+			user_raw_to_fail.append(float(raw_distance))
+
+	if not user_raw_to_fail:
+		logger.warning("Neural analyze aborted: no finite distances to fail anchors")
+		return compute_scoring_result(
+			similarity=0.0,
+			temporal_distance=float("inf"),
+			metric=metric_key,
+			model_name=model_name,
+			status="invalid_reference",
+			reason="invalid_fail_anchor_distances",
+		)
 
 	aggregated_similarity = float(np.mean(user_similarity_to_perfect))
 	aggregated_temporal_distance = float(np.mean(user_temporal_to_perfect))
-	user_raw_distance = median_or_default(user_raw_to_perfect, default=float("inf"))
-	user_zero_distance = median_or_default(user_raw_to_zero, default=float("inf"))
+	user_profile = build_anchor_distance_profile_from_distances(
+		perfect_distances=user_raw_to_perfect,
+		moderate_distances=user_raw_to_moderate,
+		fail_distances=user_raw_to_fail,
+	)
 
-	force_zero = False
-	reason = ""
-	if is_known_zero_anchor(user_audio_path, anchor_set):
-		force_zero = True
-		reason = "known_zero_anchor"
-	elif np.isfinite(user_zero_distance) and np.isfinite(user_raw_distance) and user_zero_distance <= user_raw_distance:
-		force_zero = True
-		reason = "closer_to_zero_anchors"
-
-	result = compute_calibrated_scoring_result(
+	result = compute_anchor_profile_calibrated_scoring_result(
 		similarity=aggregated_similarity,
 		temporal_distance=aggregated_temporal_distance,
 		metric=metric_key,
 		model_name=model_name,
-		raw_distance=user_raw_distance,
+		profile=user_profile,
 		calibration_params=calibration_params,
 		status="ok",
-		reason=reason,
-		force_zero=force_zero,
+		reason="",
 	)
 
 	if not result.reason:
 		anchor_stats = describe_anchor_set(anchor_set)
 		result.reason = (
 			f"anchors:perfect={anchor_stats['perfect']};"
-			f"wrong={anchor_stats['wrong']};"
+			f"fail={anchor_stats['fail']};"
 			f"moderate={anchor_stats['moderate']};"
 			f"empty={anchor_stats['empty_word']}"
 		)
+
+	logger.info(
+		"Neural analyze finished: status=%s score=%.2f raw_distance=%s",
+		result.status,
+		result.pronunciation_score,
+		result.raw_distance,
+	)
 
 	return result
  

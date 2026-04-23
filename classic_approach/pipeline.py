@@ -5,11 +5,13 @@ from pathlib import Path
 
 import numpy as np
 from asr.vosk import VoskError, check_expected_text_for_preprocessed_audio
+from app.logging_config import get_logger
 from scoring.anchor_calibration import (
+    build_anchor_distance_profile_from_distances,
+    build_anchor_distance_profiles,
     describe_anchor_set,
-    fit_sigmoid_from_anchor_distances,
+    fit_sigmoid_from_anchor_profiles,
     get_word_anchor_set,
-    is_known_zero_anchor,
     median_or_default,
     normalize_word,
 )
@@ -21,11 +23,12 @@ from .preprocessing import preprocess_audio
 from .scorer import (
     ScoringResult,
     ComputeScoringResult,
-    compute_calibrated_scoring_result,
+    compute_profile_calibrated_scoring_result,
 )
 
 
 DEFAULT_MAX_ANCHORS_PER_CLASS = 12
+logger = get_logger(__name__)
 
 
 @lru_cache(maxsize=4096)
@@ -116,10 +119,12 @@ def _collect_valid_anchor_paths(
                 frame_ms=frame_ms,
                 hop_ms=hop_ms,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("Skipping anchor %s: failed to extract MFCC (%s)", path, exc)
             continue
 
         if mfcc.shape[1] == 0:
+            logger.warning("Skipping anchor %s: MFCC has no frames", path)
             continue
         valid_paths.append(path)
 
@@ -135,6 +140,11 @@ def _build_anchor_calibration(
     max_anchors_per_class: int,
     anchor_root: str | None,
 ):
+    logger.info(
+        "Building classic anchor calibration for '%s' (max_per_class=%s)",
+        word,
+        max_anchors_per_class,
+    )
     anchor_set = get_word_anchor_set(
         word=word,
         anchor_root=anchor_root,
@@ -147,8 +157,14 @@ def _build_anchor_calibration(
         frame_ms=frame_ms,
         hop_ms=hop_ms,
     )
-    valid_zero_paths = _collect_valid_anchor_paths(
-        paths=anchor_set.zero_paths,
+    valid_moderate_paths = _collect_valid_anchor_paths(
+        paths=anchor_set.moderate_paths,
+        n_mfcc=n_mfcc,
+        frame_ms=frame_ms,
+        hop_ms=hop_ms,
+    )
+    valid_fail_paths = _collect_valid_anchor_paths(
+        paths=anchor_set.fail_paths,
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
@@ -156,50 +172,52 @@ def _build_anchor_calibration(
 
     if not valid_perfect_paths:
         raise ValueError("missing_perfect_anchors")
-    if not valid_zero_paths:
-        raise ValueError("missing_zero_anchors")
+    if not valid_fail_paths:
+        raise ValueError("missing_fail_anchors")
 
-    distances_100: list[float] = []
-    for left_idx in range(len(valid_perfect_paths)):
-        for right_idx in range(left_idx + 1, len(valid_perfect_paths)):
-            distance = _distance_between_anchor_paths(
-                valid_perfect_paths[left_idx],
-                valid_perfect_paths[right_idx],
-                n_mfcc=n_mfcc,
-                frame_ms=frame_ms,
-                hop_ms=hop_ms,
-                sakoe_chiba_radius=sakoe_chiba_radius,
-            )
-            if np.isfinite(distance):
-                distances_100.append(float(distance))
+    distance_cache: dict[tuple[str, str], float] = {}
 
-    if not distances_100:
-        distances_100 = [0.0]
+    def _cached_distance(left_path: str, right_path: str) -> float:
+        key = (left_path, right_path) if left_path <= right_path else (right_path, left_path)
+        cached = distance_cache.get(key)
+        if cached is not None:
+            return cached
 
-    distances_0: list[float] = []
-    for perfect_path in valid_perfect_paths:
-        for zero_path in valid_zero_paths:
-            distance = _distance_between_anchor_paths(
-                perfect_path,
-                zero_path,
-                n_mfcc=n_mfcc,
-                frame_ms=frame_ms,
-                hop_ms=hop_ms,
-                sakoe_chiba_radius=sakoe_chiba_radius,
-            )
-            if np.isfinite(distance):
-                distances_0.append(float(distance))
+        distance = _distance_between_anchor_paths(
+            left_path,
+            right_path,
+            n_mfcc=n_mfcc,
+            frame_ms=frame_ms,
+            hop_ms=hop_ms,
+            sakoe_chiba_radius=sakoe_chiba_radius,
+        )
+        distance_cache[key] = float(distance)
+        return float(distance)
 
-    if not distances_0:
-        raise ValueError("invalid_zero_anchor_distances")
-
-    calibration_params = fit_sigmoid_from_anchor_distances(
-        distances_100=distances_100,
-        distances_0=distances_0,
-        epsilon=0.02,
+    perfect_profiles, moderate_profiles, fail_profiles = build_anchor_distance_profiles(
+        perfect_items=valid_perfect_paths,
+        moderate_items=valid_moderate_paths,
+        fail_items=valid_fail_paths,
+        distance_fn=_cached_distance,
     )
 
-    return anchor_set, calibration_params, valid_perfect_paths, valid_zero_paths
+    calibration_params = fit_sigmoid_from_anchor_profiles(
+        perfect_profiles=perfect_profiles,
+        moderate_profiles=moderate_profiles,
+        fail_profiles=fail_profiles,
+    )
+
+    logger.info(
+        "Classic calibration ready for '%s': perfect=%s moderate=%s fail=%s d100=%.4f d0=%.4f",
+        word,
+        len(valid_perfect_paths),
+        len(valid_moderate_paths),
+        len(valid_fail_paths),
+        calibration_params.d100,
+        calibration_params.d0,
+    )
+
+    return anchor_set, calibration_params, valid_perfect_paths, valid_moderate_paths, valid_fail_paths
 
 
 def analyze(
@@ -213,8 +231,15 @@ def analyze(
     max_anchors_per_class: int = DEFAULT_MAX_ANCHORS_PER_CLASS,
     anchor_root: str | None = None,
 ) -> ScoringResult:
+    logger.info(
+        "Classic analyze started: path=%s transcript='%s' use_vosk=%s",
+        user_audio_path,
+        transcript,
+        use_vosk,
+    )
     normalized_word = normalize_word(transcript)
     if not normalized_word:
+        logger.warning("Classic analyze aborted: empty transcript")
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float("inf"),
@@ -228,6 +253,7 @@ def analyze(
         sample_rate=user_audio.sample_rate,
     )
     if not speech_gate.passed:
+        logger.warning("Classic analyze aborted: speech gate failed")
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float("inf"),
@@ -243,6 +269,7 @@ def analyze(
                 expected_text=transcript,
             )
         except (VoskError, ValueError) as exc:
+            logger.error("Classic analyze aborted: Vosk failure (%s)", exc)
             return ComputeScoringResult(
                 dtw_score=0.0,
                 distance=float("inf"),
@@ -255,6 +282,7 @@ def analyze(
                 f"recognized:{transcript_check.recognized_text};"
                 f"expected:{transcript_check.expected_text}"
             )
+            logger.warning("Classic analyze aborted: ASR mismatch (%s)", reason)
             return ComputeScoringResult(
                 dtw_score=0.0,
                 distance=float("inf"),
@@ -263,7 +291,13 @@ def analyze(
             )
 
     try:
-        anchor_set, calibration_params, valid_perfect_paths, valid_zero_paths = _build_anchor_calibration(
+        (
+            anchor_set,
+            calibration_params,
+            valid_perfect_paths,
+            valid_moderate_paths,
+            valid_fail_paths,
+        ) = _build_anchor_calibration(
             word=normalized_word,
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
@@ -273,6 +307,7 @@ def analyze(
             anchor_root=anchor_root,
         )
     except ValueError as exc:
+        logger.warning("Classic analyze aborted: invalid anchors (%s)", exc)
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float("inf"),
@@ -289,6 +324,7 @@ def analyze(
     )
 
     if user_mfcc.shape[1] == 0:
+        logger.warning("Classic analyze aborted: user MFCC is empty")
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float("inf"),
@@ -313,6 +349,7 @@ def analyze(
             user_to_perfect_distances.append(float(distance))
 
     if not user_to_perfect_distances:
+        logger.warning("Classic analyze aborted: no finite distances to perfect anchors")
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float("inf"),
@@ -320,40 +357,58 @@ def analyze(
             reason="invalid_perfect_anchor_distances",
         )
 
-    user_to_zero_distances: list[float] = []
-    for zero_path in valid_zero_paths:
-        zero_mfcc = _extract_anchor_mfcc(
-            anchor_path=zero_path,
+    user_to_moderate_distances: list[float] = []
+    for moderate_path in valid_moderate_paths:
+        moderate_mfcc = _extract_anchor_mfcc(
+            anchor_path=moderate_path,
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
         )
         distance = dtw_distance(
             user_mfcc,
-            zero_mfcc,
+            moderate_mfcc,
             sakoe_chiba_radius=sakoe_chiba_radius,
         )
         if np.isfinite(distance):
-            user_to_zero_distances.append(float(distance))
+            user_to_moderate_distances.append(float(distance))
 
-    user_distance = median_or_default(user_to_perfect_distances, default=float("inf"))
-    user_zero_distance = median_or_default(user_to_zero_distances, default=float("inf"))
+    user_to_fail_distances: list[float] = []
+    for fail_path in valid_fail_paths:
+        fail_mfcc = _extract_anchor_mfcc(
+            anchor_path=fail_path,
+            n_mfcc=n_mfcc,
+            frame_ms=frame_ms,
+            hop_ms=hop_ms,
+        )
+        distance = dtw_distance(
+            user_mfcc,
+            fail_mfcc,
+            sakoe_chiba_radius=sakoe_chiba_radius,
+        )
+        if np.isfinite(distance):
+            user_to_fail_distances.append(float(distance))
 
-    force_zero = False
-    reason = ""
-    if is_known_zero_anchor(user_audio_path, anchor_set):
-        force_zero = True
-        reason = "known_zero_anchor"
-    elif np.isfinite(user_zero_distance) and np.isfinite(user_distance) and user_zero_distance <= user_distance:
-        force_zero = True
-        reason = "closer_to_zero_anchors"
+    if not user_to_fail_distances:
+        logger.warning("Classic analyze aborted: no finite distances to fail anchors")
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float("inf"),
+            status="invalid_reference",
+            reason="invalid_fail_anchor_distances",
+        )
 
-    result = compute_calibrated_scoring_result(
-        distance=user_distance,
+    user_profile = build_anchor_distance_profile_from_distances(
+        perfect_distances=user_to_perfect_distances,
+        moderate_distances=user_to_moderate_distances,
+        fail_distances=user_to_fail_distances,
+    )
+
+    result = compute_profile_calibrated_scoring_result(
+        profile=user_profile,
         calibration_params=calibration_params,
         status="ok",
-        reason=reason,
-        force_zero=force_zero,
+        reason="",
     )
 
     # Добавляем краткий свод по якорям в reason только при пустом reason.
@@ -361,9 +416,16 @@ def analyze(
         anchor_stats = describe_anchor_set(anchor_set)
         result.reason = (
             f"anchors:perfect={anchor_stats['perfect']};"
-            f"wrong={anchor_stats['wrong']};"
+            f"fail={anchor_stats['fail']};"
             f"moderate={anchor_stats['moderate']};"
             f"empty={anchor_stats['empty_word']}"
         )
+
+    logger.info(
+        "Classic analyze finished: status=%s score=%.2f distance=%s",
+        result.status,
+        result.dtw_score,
+        result.distance,
+    )
 
     return result

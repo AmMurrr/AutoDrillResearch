@@ -1,8 +1,18 @@
 from dataclasses import dataclass
 
 import numpy as np
+from app.logging_config import get_logger
 
-from scoring.anchor_calibration import SigmoidCalibrationParams, sigmoid_score
+from scoring.anchor_calibration import (
+    AnchorDistanceProfile,
+    MultiAnchorSigmoidParams,
+    SigmoidCalibrationParams,
+    score_from_anchor_profile,
+    sigmoid_score,
+)
+
+
+logger = get_logger(__name__)
 
 
 def _verdict_from_score(score: float) -> str:
@@ -39,6 +49,8 @@ class ScoringResult:
     reason: str = ""
     d100: float | None = None
     d0: float | None = None
+    moderate_distance: float | None = None
+    fail_distance: float | None = None
 
 
 def ComputeScoringResult(
@@ -48,6 +60,8 @@ def ComputeScoringResult(
     reason: str = "",
     d100: float | None = None,
     d0: float | None = None,
+    moderate_distance: float | None = None,
+    fail_distance: float | None = None,
 ) -> ScoringResult:
     result = _build_scoring_result(
         score=float(dtw_score),
@@ -57,6 +71,8 @@ def ComputeScoringResult(
     )
     result.d100 = d100
     result.d0 = d0
+    result.moderate_distance = moderate_distance
+    result.fail_distance = fail_distance
     return result
 
 
@@ -68,6 +84,7 @@ def compute_calibrated_scoring_result(
     force_zero: bool = False,
 ) -> ScoringResult:
     if status != "ok":
+        logger.warning("Classic scoring forced to zero because status=%s", status)
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float(distance),
@@ -78,6 +95,7 @@ def compute_calibrated_scoring_result(
         )
 
     if force_zero or not np.isfinite(distance):
+        logger.warning("Classic scoring forced to zero (force_zero=%s, distance=%s)", force_zero, distance)
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float(distance),
@@ -88,6 +106,7 @@ def compute_calibrated_scoring_result(
         )
 
     calibrated_score = sigmoid_score(float(distance), calibration_params)
+    logger.info("Classic scoring calibrated: distance=%.6f score=%.2f", float(distance), calibrated_score)
     return ComputeScoringResult(
         dtw_score=calibrated_score,
         distance=float(distance),
@@ -95,6 +114,58 @@ def compute_calibrated_scoring_result(
         reason=reason,
         d100=calibration_params.d100,
         d0=calibration_params.d0,
+    )
+
+
+def compute_profile_calibrated_scoring_result(
+    profile: AnchorDistanceProfile,
+    calibration_params: MultiAnchorSigmoidParams,
+    status: str = "ok",
+    reason: str = "",
+) -> ScoringResult:
+    if status != "ok":
+        logger.warning("Classic multi-anchor scoring forced to zero because status=%s", status)
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float(profile.perfect_distance),
+            status=status,
+            reason=reason,
+            d100=calibration_params.d100,
+            d0=calibration_params.d0,
+            moderate_distance=profile.moderate_distance,
+            fail_distance=profile.fail_distance,
+        )
+
+    if not profile.is_valid:
+        logger.warning("Classic multi-anchor scoring got invalid profile: %s", profile)
+        return ComputeScoringResult(
+            dtw_score=0.0,
+            distance=float(profile.perfect_distance),
+            status="invalid_reference",
+            reason="invalid_anchor_profile",
+            d100=calibration_params.d100,
+            d0=calibration_params.d0,
+            moderate_distance=profile.moderate_distance,
+            fail_distance=profile.fail_distance,
+        )
+
+    calibrated_score = score_from_anchor_profile(profile, calibration_params)
+    logger.info(
+        "Classic multi-anchor scoring calibrated: perfect=%.6f moderate=%.6f fail=%.6f score=%.2f",
+        float(profile.perfect_distance),
+        float(profile.moderate_distance),
+        float(profile.fail_distance),
+        calibrated_score,
+    )
+    return ComputeScoringResult(
+        dtw_score=calibrated_score,
+        distance=float(profile.perfect_distance),
+        status=status,
+        reason=reason,
+        d100=calibration_params.d100,
+        d0=calibration_params.d0,
+        moderate_distance=profile.moderate_distance,
+        fail_distance=profile.fail_distance,
     )
 
 
@@ -128,6 +199,7 @@ def compute_scoring_result_from_distance(
 
 def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
     if not results:
+        logger.warning("Classic scoring aggregation got empty results")
         return _build_scoring_result(
             score=0.0,
             distance=float("inf"),
@@ -139,6 +211,13 @@ def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:
 
     finite_distances = [result.distance for result in results if np.isfinite(result.distance)]
     aggregated_distance = float(np.mean(finite_distances)) if finite_distances else float("inf")
+
+    logger.info(
+        "Classic scoring aggregated %s results: score=%.2f distance=%s",
+        len(results),
+        aggregated_score,
+        aggregated_distance,
+    )
 
     return _build_scoring_result(
         score=aggregated_score,

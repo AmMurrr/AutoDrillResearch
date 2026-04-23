@@ -4,6 +4,10 @@ from dataclasses import dataclass
 
 import dtaidistance.dtw_ndim as dtw_ndim
 import numpy as np
+from app.logging_config import get_logger
+
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -61,12 +65,15 @@ def _dtw_temporal_distance(
 
 	n, m = seq_a.shape[0], seq_b.shape[0]
 	if n == 0 or m == 0:
+		logger.warning("Neural temporal DTW got empty sequence (n=%s, m=%s)", n, m)
 		return float("inf")
 
 	feature_dim = max(1, seq_a.shape[1])
 	window = _resolve_window(sakoe_chiba_radius)
 	raw_distance = float(dtw_ndim.distance(seq_a, seq_b, window=window))
-	return raw_distance / (max(n, m) * np.sqrt(feature_dim))
+	normalized = raw_distance / (max(n, m) * np.sqrt(feature_dim))
+	logger.debug("Neural temporal DTW distance computed: %.6f", normalized)
+	return normalized
 
 
 def compare_embeddings(
@@ -90,6 +97,12 @@ def compare_embeddings(
 		user_frames,
 		ref_frames,
 		sakoe_chiba_radius=sakoe_chiba_radius,
+	)
+	logger.debug(
+		"Compared embeddings: similarity=%.6f temporal_distance=%.6f metric=%s",
+		similarity,
+		temporal_distance,
+		metric_key,
 	)
 
 	return EmbeddingComparisonResult(

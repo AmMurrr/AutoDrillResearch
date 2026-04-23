@@ -4,10 +4,13 @@ import re
 import sqlite3
 from pathlib import Path
 
+from app.logging_config import get_logger
+
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = WORKSPACE_ROOT / "data" / "reference_paths.sqlite3"
 REFERENCE_DIR = WORKSPACE_ROOT / "data" / "reference"
 AUDIO_EXTENSIONS = {".wav", ".mp3"}
+logger = get_logger(__name__)
 
 
 def _normalize_word(word: str) -> str:
@@ -135,13 +138,16 @@ def _migrate_reference_paths_table(conn: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Initializing reference DB at %s", DB_PATH)
 
     with sqlite3.connect(DB_PATH) as conn:
         if not _table_exists(conn, "reference_paths"):
+            logger.info("Creating reference_paths table")
             _create_reference_paths_table(conn)
         else:
             columns = _get_table_columns(conn, "reference_paths")
             if "word" not in columns or not _has_unique_word_path(conn):
+                logger.warning("Migrating legacy reference_paths schema")
                 _migrate_reference_paths_table(conn)
             else:
                 _create_reference_paths_table(conn)
@@ -171,7 +177,9 @@ def list_reference_paths(word: str | None = None, limit: int | None = None) -> l
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        logger.info("Loaded %s reference paths (word=%s, limit=%s)", len(result), clean_word or None, limit)
+        return result
 
 
 def list_reference_words() -> list[dict]:
@@ -186,13 +194,16 @@ def list_reference_words() -> list[dict]:
             ORDER BY word ASC
             """
         ).fetchall()
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        logger.debug("Loaded %s words from reference DB", len(result))
+        return result
 
 
 def add_reference_path(word: str, path: str, label: str = "") -> bool:
     clean_word = _normalize_word(word)
     clean_path = path.strip()
     if not clean_word or not clean_path:
+        logger.warning("Rejected empty reference insert (word=%s, path=%s)", word, path)
         return False
 
     init_db()
@@ -202,7 +213,12 @@ def add_reference_path(word: str, path: str, label: str = "") -> bool:
             (clean_word, clean_path, label.strip()),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        inserted = cursor.rowcount > 0
+        if inserted:
+            logger.info("Added reference path: word=%s path=%s", clean_word, clean_path)
+        else:
+            logger.warning("Reference path already exists: word=%s path=%s", clean_word, clean_path)
+        return inserted
 
 
 def delete_reference_path(reference_id: int) -> bool:
@@ -210,12 +226,18 @@ def delete_reference_path(reference_id: int) -> bool:
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("DELETE FROM reference_paths WHERE id = ?", (reference_id,))
         conn.commit()
-        return cursor.rowcount > 0
+        deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("Deleted reference path id=%s", reference_id)
+        else:
+            logger.warning("Reference path id=%s not found for deletion", reference_id)
+        return deleted
 
 
 def scan_reference_dir() -> int:
     init_db()
     REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("Scanning reference dir: %s", REFERENCE_DIR)
 
     inserted = 0
     for file_path in sorted(REFERENCE_DIR.rglob("*")):
@@ -226,5 +248,7 @@ def scan_reference_dir() -> int:
         guessed_word = _guess_word_from_path(relative_path)
         if add_reference_path(guessed_word, relative_path):
             inserted += 1
+
+    logger.info("Finished scanning reference dir, inserted=%s", inserted)
 
     return inserted

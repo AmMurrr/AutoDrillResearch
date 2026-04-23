@@ -4,6 +4,10 @@ from dataclasses import dataclass
 
 import librosa
 import numpy as np
+from app.logging_config import get_logger
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,7 @@ def validate_speech_signal(
         waveform = waveform.reshape(-1)
 
     if waveform.size == 0 or sample_rate <= 0:
+        logger.warning("Classic speech gate failed: empty waveform or invalid sample rate")
         return SpeechGateResult(
             passed=False,
             status="empty_audio",
@@ -126,6 +131,17 @@ def validate_speech_signal(
         and spectral_flatness <= float(max_spectral_flatness)
         and not is_long_stationary
     )
+
+    if not is_valid:
+        logger.warning(
+            "Classic speech gate rejected audio: duration=%.3f rms_dbfs=%.2f voiced_ratio=%.3f clipping_ratio=%.3f",
+            duration_sec,
+            rms_dbfs,
+            voiced_ratio,
+            clipping_ratio,
+        )
+    else:
+        logger.info("Classic speech gate passed: duration=%.3f", duration_sec)
 
     return SpeechGateResult(
         passed=bool(is_valid),

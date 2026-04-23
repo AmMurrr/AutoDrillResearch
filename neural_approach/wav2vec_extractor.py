@@ -6,12 +6,14 @@ import os
 from pathlib import Path
 
 import numpy as np
+from app.logging_config import get_logger
 import torch
 from transformers import AutoFeatureExtractor, AutoModel
 
 
 DEFAULT_MODEL_NAME = "facebook/wav2vec2-base"
 HF_TOKEN_ENV_VAR = "HF_TOKEN"
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -27,6 +29,7 @@ def _resolve_device(device: str | None = None) -> torch.device:
 	if device is not None and device.strip():
 		requested = device.strip().lower()
 		if requested == "cuda" and not torch.cuda.is_available():
+			logger.warning("CUDA requested but unavailable, falling back to CPU")
 			return torch.device("cpu")
 		return torch.device(requested)
 
@@ -100,12 +103,32 @@ def resolve_hf_token(hf_token: str | None = None) -> str | None:
 	return None
 
 
+def _use_local_files_only() -> bool:
+	for env_var in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+		value = os.getenv(env_var, "").strip().lower()
+		if value in {"1", "true", "yes", "on"}:
+			return True
+	return False
+
+
 @lru_cache(maxsize=8)
 def _load_model_bundle(model_name: str, device_str: str, hf_token: str | None):
-	feature_extractor = AutoFeatureExtractor.from_pretrained(model_name, token=hf_token)
-	model = AutoModel.from_pretrained(model_name, token=hf_token)
+	logger.info("Loading wav2vec bundle: model=%s device=%s", model_name, device_str)
+	local_files_only = _use_local_files_only()
+	feature_extractor = AutoFeatureExtractor.from_pretrained(
+		model_name,
+		token=hf_token,
+		local_files_only=local_files_only,
+	)
+	model = AutoModel.from_pretrained(
+		model_name,
+		token=hf_token,
+		local_files_only=local_files_only,
+		use_safetensors=False,
+	)
 	model.eval()
 	model.to(torch.device(device_str))
+	logger.info("wav2vec bundle loaded: model=%s device=%s", model_name, device_str)
 	return feature_extractor, model
 
 
@@ -116,6 +139,7 @@ def extract_wav2vec_embeddings(
 	device: str | None = None,
 	hf_token: str | None = None,
 ) -> Wav2VecEmbeddings:
+	logger.info("Extracting wav2vec embeddings: model=%s sample_rate=%s", model_name, sample_rate)
 	if sample_rate != 16000:
 		raise ValueError("wav2vec2-base expects 16 kHz audio after preprocessing")
 
@@ -147,6 +171,7 @@ def extract_wav2vec_embeddings(
 
 	frame_embeddings = outputs.last_hidden_state.squeeze(0).detach().cpu().numpy().astype(np.float32)
 	pooled_embedding = frame_embeddings.mean(axis=0, dtype=np.float32)
+	logger.info("wav2vec embeddings extracted: frames=%s dim=%s", frame_embeddings.shape[0], frame_embeddings.shape[1])
 
 	return Wav2VecEmbeddings(
 		frame_embeddings=frame_embeddings,
