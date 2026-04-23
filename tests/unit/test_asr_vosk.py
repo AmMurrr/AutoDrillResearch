@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from asr.vosk import compare_with_expected_text
+
+
+pytestmark = pytest.mark.unit
 
 
 def test_compare_with_expected_text_exact_match() -> None:

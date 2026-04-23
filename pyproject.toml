@@ -132,3 +132,10 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app", "app.*", "asr", "asr.*", "classic_approach", "classic_approach.*", "neural_approach", "neural_approach.*", "scoring", "scoring.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: fast isolated tests for a single module or function",
+    "integration: end-to-end or multi-module tests that use real project assets",
+]

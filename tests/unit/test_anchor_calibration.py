@@ -2,18 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scoring.anchor_calibration import (
     AnchorDistanceProfile,
-    build_anchor_distance_profiles,
-    fit_sigmoid_from_anchor_profiles,
-    score_from_anchor_profile,
     SigmoidCalibrationParams,
+    build_anchor_distance_profiles,
     fit_sigmoid_from_anchor_distances,
+    fit_sigmoid_from_anchor_profiles,
     get_word_anchor_set,
     list_anchor_words,
+    score_from_anchor_profile,
     should_force_zero_by_zero_anchors,
     sigmoid_score,
 )
+
+
+pytestmark = pytest.mark.unit
 
 
 def _touch(path: Path) -> None:
