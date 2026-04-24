@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import dtaidistance.dtw_ndim as dtw_ndim
 import numpy as np
 from app.logging_config import get_logger
+
+from .wav2vec_extractor import statistical_pooling
 
 
 logger = get_logger(__name__)
@@ -39,6 +42,32 @@ def _as_frame_matrix(embeddings: np.ndarray) -> np.ndarray:
 	return arr
 
 
+def _as_pooled_vector(embedding: np.ndarray) -> np.ndarray:
+	arr = np.asarray(embedding, dtype=np.float32)
+	if arr.ndim != 1:
+		raise ValueError("Expected pooled embedding with shape (pooled_dim,)")
+	return arr
+
+
+def _embedding_parts(
+	embeddings: Any,
+	pooled_embedding: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+	if hasattr(embeddings, "frame_embeddings"):
+		frames = _as_frame_matrix(getattr(embeddings, "frame_embeddings"))
+		precomputed_pool = pooled_embedding
+		if precomputed_pool is None:
+			precomputed_pool = getattr(embeddings, "pooled_embedding", None)
+		if precomputed_pool is not None:
+			return frames, _as_pooled_vector(precomputed_pool)
+		return frames, statistical_pooling(frames)
+
+	frames = _as_frame_matrix(embeddings)
+	if pooled_embedding is not None:
+		return frames, _as_pooled_vector(pooled_embedding)
+	return frames, statistical_pooling(frames)
+
+
 def _l2_normalize_rows(matrix: np.ndarray, eps: float = 1e-8) -> np.ndarray:
 	norms = np.linalg.norm(matrix, axis=1, keepdims=True)
 	return matrix / np.maximum(norms, eps)
@@ -49,10 +78,6 @@ def _cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray, eps: float = 1e-8) 
 	if denom <= eps:
 		return 0.0
 	return float(np.dot(vec_a, vec_b) / denom)
-
-
-def _pooled_embedding(frame_embeddings: np.ndarray) -> np.ndarray:
-	return frame_embeddings.mean(axis=0, dtype=np.float32)
 
 
 def _dtw_temporal_distance(
@@ -77,18 +102,17 @@ def _dtw_temporal_distance(
 
 
 def compare_embeddings(
-	user_embeddings: np.ndarray,
-	reference_embeddings: np.ndarray,
+	user_embeddings: Any,
+	reference_embeddings: Any,
 	metric: str = "cosine",
 	sakoe_chiba_radius: int | None = None,
+	user_pooled_embedding: np.ndarray | None = None,
+	reference_pooled_embedding: np.ndarray | None = None,
 ) -> EmbeddingComparisonResult:
 	metric_key = _resolve_metric(metric)
 
-	user_frames = _as_frame_matrix(user_embeddings)
-	ref_frames = _as_frame_matrix(reference_embeddings)
-
-	user_pooled = _pooled_embedding(user_frames)
-	ref_pooled = _pooled_embedding(ref_frames)
+	user_frames, user_pooled = _embedding_parts(user_embeddings, user_pooled_embedding)
+	ref_frames, ref_pooled = _embedding_parts(reference_embeddings, reference_pooled_embedding)
 
 	# Косинусное сходство естественно лежит в диапазоне [-1, 1].
 	similarity = _cosine_similarity(user_pooled, ref_pooled)

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from neural_approach.wav2vec_extractor import extract_wav2vec_embeddings
+from neural_approach.wav2vec_extractor import extract_wav2vec_embeddings, statistical_pooling
 
 
 pytestmark = pytest.mark.unit
@@ -49,7 +49,25 @@ def test_extract_wav2vec_embeddings_with_mocked_model(monkeypatch) -> None:
     result = extract_wav2vec_embeddings(samples, sample_rate=16000, model_name="fake/model")
 
     assert result.frame_embeddings.shape == (4, 4)
-    assert result.pooled_embedding.shape == (4,)
+    assert result.pooled_embedding.shape == (8,)
+    assert np.allclose(result.pooled_embedding, statistical_pooling(result.frame_embeddings))
     assert result.sample_rate == 16000
     assert result.model_name == "fake/model"
     assert result.device == "cpu"
+
+
+def test_statistical_pooling_concatenates_mean_and_std() -> None:
+    frames = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, 6.0],
+            [5.0, 10.0],
+        ],
+        dtype=np.float32,
+    )
+
+    pooled = statistical_pooling(frames)
+
+    assert pooled.shape == (4,)
+    assert np.allclose(pooled[:2], [3.0, 6.0])
+    assert np.allclose(pooled[2:], np.std(frames, axis=0))

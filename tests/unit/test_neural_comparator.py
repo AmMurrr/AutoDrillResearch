@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -89,3 +91,24 @@ def test_compare_embeddings_invalid_metric() -> None:
     frames = np.ones((3, 4), dtype=np.float32)
     with pytest.raises(ValueError):
         compare_embeddings(frames, frames, metric="manhattan")
+
+
+def test_compare_embeddings_uses_precomputed_pooled_embeddings(monkeypatch) -> None:
+    frames = np.ones((3, 4), dtype=np.float32)
+    user = SimpleNamespace(
+        frame_embeddings=frames,
+        pooled_embedding=np.array([1.0, 0.0], dtype=np.float32),
+    )
+    reference = SimpleNamespace(
+        frame_embeddings=frames,
+        pooled_embedding=np.array([0.0, 1.0], dtype=np.float32),
+    )
+
+    monkeypatch.setattr(
+        "neural_approach.embedding_comparator.dtw_ndim.distance",
+        lambda seq_a, seq_b, window=None: 0.0,
+    )
+
+    result = compare_embeddings(user, reference, metric="cosine")
+
+    assert result.similarity == 0.0

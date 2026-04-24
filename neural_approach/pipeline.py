@@ -24,7 +24,7 @@ from .scorer import (
 	compute_raw_distance,
 	compute_scoring_result,
 )
-from .wav2vec_extractor import DEFAULT_MODEL_NAME, extract_wav2vec_embeddings
+from .wav2vec_extractor import DEFAULT_MODEL_NAME, Wav2VecEmbeddings, extract_wav2vec_embeddings
 
 
 DEFAULT_MAX_ANCHORS_PER_CLASS = 12
@@ -40,19 +40,18 @@ def _extract_anchor_embeddings_cached(
 	model_name: str,
 	device: str | None,
 	hf_token: str | None,
-) -> np.ndarray:
+) -> Wav2VecEmbeddings:
 	del mtime_ns
 	del file_size
 
 	anchor_audio = preprocess_audio(anchor_path)
-	anchor_embeddings = extract_wav2vec_embeddings(
+	return extract_wav2vec_embeddings(
 		anchor_audio.samples,
 		anchor_audio.sample_rate,
 		model_name=model_name,
 		device=device,
 		hf_token=hf_token,
 	)
-	return anchor_embeddings.frame_embeddings
 
 
 def _extract_anchor_embeddings(
@@ -60,7 +59,7 @@ def _extract_anchor_embeddings(
 	model_name: str,
 	device: str | None,
 	hf_token: str | None,
-) -> np.ndarray:
+) -> Wav2VecEmbeddings:
 	anchor_file = Path(anchor_path)
 	stats = anchor_file.stat()
 	return _extract_anchor_embeddings_cached(
@@ -82,7 +81,7 @@ def _collect_valid_anchor_paths(
 	valid_paths: list[str] = []
 	for path in paths:
 		try:
-			frame_embeddings = _extract_anchor_embeddings(
+			embeddings = _extract_anchor_embeddings(
 				anchor_path=path,
 				model_name=model_name,
 				device=device,
@@ -92,7 +91,7 @@ def _collect_valid_anchor_paths(
 			logger.warning("Skipping anchor %s: failed to extract embeddings (%s)", path, exc)
 			continue
 
-		if int(frame_embeddings.shape[0]) == 0:
+		if int(embeddings.frame_embeddings.shape[0]) == 0:
 			logger.warning("Skipping anchor %s: no embedding frames", path)
 			continue
 		valid_paths.append(path)
@@ -101,8 +100,8 @@ def _collect_valid_anchor_paths(
 
 
 def _compare_raw_distance(
-	embeddings_a: np.ndarray,
-	embeddings_b: np.ndarray,
+	embeddings_a: Wav2VecEmbeddings,
+	embeddings_b: Wav2VecEmbeddings,
 	similarity_metric: str,
 	sakoe_chiba_radius: int | None,
 	raw_distance_alpha: float,
@@ -397,7 +396,7 @@ def analyze(
 			hf_token=hf_token,
 		)
 		comparison, raw_distance = _compare_raw_distance(
-			embeddings_a=user_embeddings.frame_embeddings,
+			embeddings_a=user_embeddings,
 			embeddings_b=perfect_embeddings,
 			similarity_metric=metric_key,
 			sakoe_chiba_radius=sakoe_chiba_radius,
@@ -428,7 +427,7 @@ def analyze(
 			hf_token=hf_token,
 		)
 		_, raw_distance = _compare_raw_distance(
-			embeddings_a=user_embeddings.frame_embeddings,
+			embeddings_a=user_embeddings,
 			embeddings_b=moderate_embeddings,
 			similarity_metric=metric_key,
 			sakoe_chiba_radius=sakoe_chiba_radius,
@@ -446,7 +445,7 @@ def analyze(
 			hf_token=hf_token,
 		)
 		_, raw_distance = _compare_raw_distance(
-			embeddings_a=user_embeddings.frame_embeddings,
+			embeddings_a=user_embeddings,
 			embeddings_b=fail_embeddings,
 			similarity_metric=metric_key,
 			sakoe_chiba_radius=sakoe_chiba_radius,

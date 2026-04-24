@@ -25,6 +25,18 @@ class Wav2VecEmbeddings:
 	device: str
 
 
+def statistical_pooling(frame_embeddings: np.ndarray) -> np.ndarray:
+	frames = np.asarray(frame_embeddings, dtype=np.float32)
+	if frames.ndim != 2:
+		raise ValueError("Expected frame embeddings with shape (n_frames, emb_dim)")
+	if frames.shape[0] == 0:
+		raise ValueError("Cannot pool empty frame embeddings")
+
+	mean = frames.mean(axis=0, dtype=np.float32)
+	std = frames.std(axis=0).astype(np.float32, copy=False)
+	return np.concatenate([mean, std]).astype(np.float32, copy=False)
+
+
 def _resolve_device(device: str | None = None) -> torch.device:
 	if device is not None and device.strip():
 		requested = device.strip().lower()
@@ -170,8 +182,13 @@ def extract_wav2vec_embeddings(
 		outputs = model(input_values=input_values, attention_mask=attention_mask)
 
 	frame_embeddings = outputs.last_hidden_state.squeeze(0).detach().cpu().numpy().astype(np.float32)
-	pooled_embedding = frame_embeddings.mean(axis=0, dtype=np.float32)
-	logger.info("wav2vec embeddings extracted: frames=%s dim=%s", frame_embeddings.shape[0], frame_embeddings.shape[1])
+	pooled_embedding = statistical_pooling(frame_embeddings)
+	logger.info(
+		"wav2vec embeddings extracted: frames=%s dim=%s pooled_dim=%s",
+		frame_embeddings.shape[0],
+		frame_embeddings.shape[1],
+		pooled_embedding.shape[0],
+	)
 
 	return Wav2VecEmbeddings(
 		frame_embeddings=frame_embeddings,
