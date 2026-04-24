@@ -39,6 +39,8 @@ def _extract_anchor_mfcc_cached(
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
+    use_deltas: bool,
+    delta_width: int,
 ) -> np.ndarray:
     del mtime_ns
     del file_size
@@ -50,6 +52,8 @@ def _extract_anchor_mfcc_cached(
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
 
 
@@ -58,6 +62,8 @@ def _extract_anchor_mfcc(
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
+    use_deltas: bool,
+    delta_width: int,
 ) -> np.ndarray:
     anchor_file = Path(anchor_path)
     stats = anchor_file.stat()
@@ -68,6 +74,8 @@ def _extract_anchor_mfcc(
         int(n_mfcc),
         int(frame_ms),
         int(hop_ms),
+        bool(use_deltas),
+        int(delta_width),
     )
 
 
@@ -77,6 +85,8 @@ def _distance_between_anchor_paths(
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
+    use_deltas: bool,
+    delta_width: int,
     sakoe_chiba_radius: int | None,
 ) -> float:
     mfcc_a = _extract_anchor_mfcc(
@@ -84,12 +94,16 @@ def _distance_between_anchor_paths(
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
     mfcc_b = _extract_anchor_mfcc(
         anchor_path=anchor_path_b,
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
 
     if mfcc_a.shape[1] == 0 or mfcc_b.shape[1] == 0:
@@ -109,6 +123,8 @@ def _collect_valid_anchor_paths(
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
+    use_deltas: bool,
+    delta_width: int,
 ) -> list[str]:
     valid_paths: list[str] = []
     for path in paths:
@@ -118,6 +134,8 @@ def _collect_valid_anchor_paths(
                 n_mfcc=n_mfcc,
                 frame_ms=frame_ms,
                 hop_ms=hop_ms,
+                use_deltas=use_deltas,
+                delta_width=delta_width,
             )
         except Exception as exc:
             logger.warning("Skipping anchor %s: failed to extract MFCC (%s)", path, exc)
@@ -136,6 +154,8 @@ def _build_anchor_calibration(
     n_mfcc: int,
     frame_ms: int,
     hop_ms: int,
+    use_deltas: bool,
+    delta_width: int,
     sakoe_chiba_radius: int | None,
     max_anchors_per_class: int,
     anchor_root: str | None,
@@ -156,18 +176,24 @@ def _build_anchor_calibration(
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
     valid_moderate_paths = _collect_valid_anchor_paths(
         paths=anchor_set.moderate_paths,
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
     valid_fail_paths = _collect_valid_anchor_paths(
         paths=anchor_set.fail_paths,
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
 
     if not valid_perfect_paths:
@@ -189,6 +215,8 @@ def _build_anchor_calibration(
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
+            use_deltas=use_deltas,
+            delta_width=delta_width,
             sakoe_chiba_radius=sakoe_chiba_radius,
         )
         distance_cache[key] = float(distance)
@@ -226,6 +254,8 @@ def analyze(
     n_mfcc: int = 20,
     frame_ms: int = 25,
     hop_ms: int = 10,
+    use_deltas: bool = True,
+    delta_width: int = 9,
     sakoe_chiba_radius: int | None = None,
     use_vosk: bool = True,
     max_anchors_per_class: int = DEFAULT_MAX_ANCHORS_PER_CLASS,
@@ -302,6 +332,8 @@ def analyze(
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
+            use_deltas=use_deltas,
+            delta_width=delta_width,
             sakoe_chiba_radius=sakoe_chiba_radius,
             max_anchors_per_class=max_anchors_per_class,
             anchor_root=anchor_root,
@@ -321,6 +353,8 @@ def analyze(
         n_mfcc=n_mfcc,
         frame_ms=frame_ms,
         hop_ms=hop_ms,
+        use_deltas=use_deltas,
+        delta_width=delta_width,
     )
 
     if user_mfcc.shape[1] == 0:
@@ -339,6 +373,8 @@ def analyze(
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
+            use_deltas=use_deltas,
+            delta_width=delta_width,
         )
         distance = dtw_distance(
             user_mfcc,
@@ -364,6 +400,8 @@ def analyze(
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
+            use_deltas=use_deltas,
+            delta_width=delta_width,
         )
         distance = dtw_distance(
             user_mfcc,
@@ -380,6 +418,8 @@ def analyze(
             n_mfcc=n_mfcc,
             frame_ms=frame_ms,
             hop_ms=hop_ms,
+            use_deltas=use_deltas,
+            delta_width=delta_width,
         )
         distance = dtw_distance(
             user_mfcc,

@@ -106,6 +106,23 @@ with col4:
         help="0 отключает ограничение окна DTW.",
     )
 
+delta_col_1, delta_col_2 = st.columns(2)
+with delta_col_1:
+    use_deltas = st.checkbox(
+        "Добавлять MFCC Δ и Δ²",
+        value=True,
+        help="Расширяет каждый кадр признаками динамики: MFCC + delta + delta-delta.",
+    )
+with delta_col_2:
+    delta_width = st.number_input(
+        "Окно Δ",
+        min_value=3,
+        max_value=25,
+        value=9,
+        step=2,
+        disabled=not use_deltas,
+    )
+
 use_vosk = st.checkbox(
     "Проверять слово через Vosk перед DTW",
     value=True,
@@ -149,6 +166,8 @@ if st.button("Запустить MVP", type="primary"):
                 n_mfcc=n_mfcc,
                 frame_ms=frame_ms,
                 hop_ms=hop_ms,
+                use_deltas=use_deltas,
+                delta_width=int(delta_width),
                 sakoe_chiba_radius=int(sakoe_chiba_radius),
                 use_vosk=use_vosk,
                 max_anchors_per_class=max_anchors_preview,
@@ -169,6 +188,9 @@ if st.button("Запустить MVP", type="primary"):
                 "режим_ввода": "аудио_из_streamlit" if audio_source is not None else "путь_вручную",
                 "использованный_путь_попытки": resolved_attempt_path,
                 "n_mfcc": n_mfcc,
+                "feature_dim": int(n_mfcc * (3 if use_deltas else 1)),
+                "use_deltas": use_deltas,
+                "delta_width": int(delta_width),
                 "frame_ms": frame_ms,
                 "hop_ms": hop_ms,
                 "sakoe_chiba_radius": int(sakoe_chiba_radius),

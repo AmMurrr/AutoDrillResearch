@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from classic_approach.dtw import dtw_distance
-from classic_approach.mfcc_extractor import apply_cmvn
+from classic_approach.mfcc_extractor import apply_cmvn, extract_mfcc
 
 
 pytestmark = pytest.mark.unit
@@ -86,3 +86,29 @@ def test_apply_cmvn_rowwise_mean_and_std() -> None:
 
     assert np.allclose(row_means, 0.0, atol=1e-6)
     assert np.allclose(row_stds, 1.0, atol=1e-6)
+
+
+def test_extract_mfcc_appends_delta_and_delta_delta_features() -> None:
+    sample_rate = 16_000
+    time = np.linspace(0.0, 0.4, int(sample_rate * 0.4), endpoint=False)
+    samples = np.sin(2.0 * np.pi * 440.0 * time).astype(np.float32)
+
+    base_features = extract_mfcc(
+        samples,
+        sample_rate,
+        n_mfcc=13,
+        use_cmvn=False,
+        use_deltas=False,
+    )
+    dynamic_features = extract_mfcc(
+        samples,
+        sample_rate,
+        n_mfcc=13,
+        use_cmvn=False,
+        use_deltas=True,
+        delta_width=9,
+    )
+
+    assert base_features.shape[0] == 13
+    assert dynamic_features.shape[0] == 39
+    assert dynamic_features.shape[1] == base_features.shape[1]
