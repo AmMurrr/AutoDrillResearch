@@ -313,7 +313,9 @@ def cross_distances(
 
 
 def median_or_default(values: Sequence[float], default: float = float("inf")) -> float:
-    finite_values = np.asarray([float(value) for value in values if np.isfinite(value)], dtype=np.float64)
+    finite_values = np.asarray(
+        [float(value) for value in values if np.isfinite(value)], dtype=np.float64
+    )
     if finite_values.size == 0:
         return float(default)
     return float(np.median(finite_values))
@@ -473,9 +475,8 @@ def fit_sigmoid_from_anchor_profiles(
 
     reg = max(float(regularization), 0.0)
     feature_dim = int(normalized_features.shape[1])
-    system_matrix = (
-        normalized_features.T @ normalized_features
-        + reg * np.eye(feature_dim, dtype=np.float64)
+    system_matrix = normalized_features.T @ normalized_features + reg * np.eye(
+        feature_dim, dtype=np.float64
     )
     rhs = normalized_features.T @ target_logits
     try:
@@ -550,8 +551,12 @@ def fit_sigmoid_from_anchor_distances(
     if not (0.0 < eps < 0.5):
         raise ValueError("epsilon must be in interval (0, 0.5)")
 
-    d100_candidates = np.asarray([float(value) for value in distances_100 if np.isfinite(value)], dtype=np.float64)
-    d0_candidates = np.asarray([float(value) for value in distances_0 if np.isfinite(value)], dtype=np.float64)
+    d100_candidates = np.asarray(
+        [float(value) for value in distances_100 if np.isfinite(value)], dtype=np.float64
+    )
+    d0_candidates = np.asarray(
+        [float(value) for value in distances_0 if np.isfinite(value)], dtype=np.float64
+    )
 
     if d100_candidates.size == 0:
         raise ValueError("distances_100 is empty or contains no finite values")
@@ -574,7 +579,9 @@ def fit_sigmoid_from_anchor_distances(
     b = (d0 + d100) / 2.0
     a = (2.0 * math.log((1.0 - eps) / eps)) / (d0 - d100)
 
-    logger.info("Fitted anchor sigmoid calibration: d100=%.4f d0=%.4f a=%.4f b=%.4f", d100, d0, a, b)
+    logger.info(
+        "Fitted anchor sigmoid calibration: d100=%.4f d0=%.4f a=%.4f b=%.4f", d100, d0, a, b
+    )
 
     return SigmoidCalibrationParams(
         d100=d100,

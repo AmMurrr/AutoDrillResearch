@@ -21,7 +21,9 @@ class PreprocessedAudio:
 
 def load_audio(path: str) -> tuple[np.ndarray, int]:
     samples, sample_rate = sf.read(path, always_2d=False)
-    logger.debug("Loaded audio from %s (sample_rate=%s, shape=%s)", path, sample_rate, np.shape(samples))
+    logger.debug(
+        "Loaded audio from %s (sample_rate=%s, shape=%s)", path, sample_rate, np.shape(samples)
+    )
     return np.asarray(samples, dtype=np.float32), int(sample_rate)
 
 
@@ -31,7 +33,9 @@ def to_mono(samples: np.ndarray) -> np.ndarray:
     return np.mean(samples, axis=1, dtype=np.float32)
 
 
-def resample_audio(samples: np.ndarray, orig_sr: int, target_sr: int = TARGET_SAMPLE_RATE) -> np.ndarray:
+def resample_audio(
+    samples: np.ndarray, orig_sr: int, target_sr: int = TARGET_SAMPLE_RATE
+) -> np.ndarray:
     if orig_sr == target_sr:
         return samples.astype(np.float32, copy=False)
     return librosa.resample(samples, orig_sr=orig_sr, target_sr=target_sr)

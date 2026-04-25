@@ -21,6 +21,7 @@ def save_to_reference(data: bytes, suffix: str, prefix: str) -> str:
     logger.info("Saved audio to reference directory: %s", rel_path)
     return rel_path
 
+
 st.title("Audio Demo")
 st.caption("Демонстрация приема аудиосигнала через Streamlit")
 
@@ -28,7 +29,7 @@ reference_word = st.text_input("Слово для сохранения в БД",
 
 st.markdown("### Запись через микрофон")
 # check params
-recorded_audio = st.audio_input("Нажмите и запишите фразу на английском") 
+recorded_audio = st.audio_input("Нажмите и запишите фразу на английском")
 
 if recorded_audio is not None:
     st.success("Аудио с микрофона получено")
@@ -73,4 +74,3 @@ if uploaded is not None:
         rel_path = save_to_reference(uploaded.getvalue(), ext, "upload")
         add_reference_path(reference_word, rel_path, "from_upload")
         st.success(f"Сохранено и добавлено в БД: {rel_path}")
-

@@ -12,7 +12,6 @@ from scoring.anchor_calibration import (
     describe_anchor_set,
     fit_sigmoid_from_anchor_profiles,
     get_word_anchor_set,
-    median_or_default,
     normalize_word,
 )
 
@@ -245,7 +244,13 @@ def _build_anchor_calibration(
         calibration_params.d0,
     )
 
-    return anchor_set, calibration_params, valid_perfect_paths, valid_moderate_paths, valid_fail_paths
+    return (
+        anchor_set,
+        calibration_params,
+        valid_perfect_paths,
+        valid_moderate_paths,
+        valid_fail_paths,
+    )
 
 
 def analyze(

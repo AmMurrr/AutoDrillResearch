@@ -129,6 +129,11 @@ dependencies = [
     "wheel==0.46.3",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "ruff==0.15.11",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app", "app.*", "asr", "asr.*", "classic_approach", "classic_approach.*", "neural_approach", "neural_approach.*", "scoring", "scoring.*"]
@@ -139,3 +144,14 @@ markers = [
     "unit: fast isolated tests for a single module or function",
     "integration: end-to-end or multi-module tests that use real project assets",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    "data",
+    "diploma_pronunciation.egg-info",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

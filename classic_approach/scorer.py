@@ -39,7 +39,6 @@ def _build_scoring_result(
     )
 
 
-
 @dataclass
 class ScoringResult:
     dtw_score: float
@@ -95,7 +94,9 @@ def compute_calibrated_scoring_result(
         )
 
     if force_zero or not np.isfinite(distance):
-        logger.warning("Classic scoring forced to zero (force_zero=%s, distance=%s)", force_zero, distance)
+        logger.warning(
+            "Classic scoring forced to zero (force_zero=%s, distance=%s)", force_zero, distance
+        )
         return ComputeScoringResult(
             dtw_score=0.0,
             distance=float(distance),
@@ -106,7 +107,9 @@ def compute_calibrated_scoring_result(
         )
 
     calibrated_score = sigmoid_score(float(distance), calibration_params)
-    logger.info("Classic scoring calibrated: distance=%.6f score=%.2f", float(distance), calibrated_score)
+    logger.info(
+        "Classic scoring calibrated: distance=%.6f score=%.2f", float(distance), calibrated_score
+    )
     return ComputeScoringResult(
         dtw_score=calibrated_score,
         distance=float(distance),

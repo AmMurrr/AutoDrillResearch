@@ -5,7 +5,12 @@ import streamlit as st
 from neural_approach.pipeline import analyze
 from neural_approach.wav2vec_extractor import DEFAULT_MODEL_NAME, HF_TOKEN_ENV_VAR, resolve_hf_token
 from app.logging_config import get_logger
-from scoring.anchor_calibration import describe_anchor_set, get_word_anchor_set, list_anchor_words, normalize_word
+from scoring.anchor_calibration import (
+    describe_anchor_set,
+    get_word_anchor_set,
+    list_anchor_words,
+    normalize_word,
+)
 
 
 logger = get_logger(__name__)
@@ -100,7 +105,9 @@ uploaded_attempt = st.file_uploader(
     type=["wav", "mp3", "m4a", "ogg", "flac"],
     key="neural_uploaded_attempt",
 )
-recorded_attempt = st.audio_input("Или запишите попытку через микрофон", key="neural_recorded_attempt")
+recorded_attempt = st.audio_input(
+    "Или запишите попытку через микрофон", key="neural_recorded_attempt"
+)
 
 st.markdown("### Параметры")
 col1, col2, col3, col4 = st.columns(4)
@@ -136,10 +143,7 @@ use_vosk = st.checkbox(
 hf_token = st.text_input(
     "HF_TOKEN (опционально)",
     value="",
-    help=(
-        "Если поле пустое, токен будет взят из переменной окружения "
-        f"{HF_TOKEN_ENV_VAR}"
-    ),
+    help=(f"Если поле пустое, токен будет взят из переменной окружения {HF_TOKEN_ENV_VAR}"),
 )
 
 if st.button("Запустить MVP", type="primary"):
@@ -165,10 +169,14 @@ if st.button("Запустить MVP", type="primary"):
         att_exists = Path(resolved_attempt_path).exists()
 
         if not att_exists:
-            logger.warning("Neural page run rejected: attempt path does not exist (%s)", resolved_attempt_path)
+            logger.warning(
+                "Neural page run rejected: attempt path does not exist (%s)", resolved_attempt_path
+            )
             st.error("Путь к аудио пользователя не существует")
         elif not anchor_set.has_required_anchors:
-            logger.warning("Neural page run rejected: anchors are incomplete for word '%s'", anchor_word)
+            logger.warning(
+                "Neural page run rejected: anchors are incomplete for word '%s'", anchor_word
+            )
             st.error(
                 "Нельзя запустить анализ: для слова отсутствуют обязательные якоря. "
                 "Проверьте data/ref."
@@ -204,7 +212,9 @@ if st.button("Запустить MVP", type="primary"):
                         "word": anchor_word,
                         "anchors": anchor_stats,
                         "attempt_exists": att_exists,
-                        "input_mode": "streamlit_audio" if audio_source is not None else "manual_path",
+                        "input_mode": "streamlit_audio"
+                        if audio_source is not None
+                        else "manual_path",
                         "attempt_path_used": resolved_attempt_path,
                         "transcript": transcript,
                         "sakoe_chiba_radius": int(sakoe_chiba_radius),
@@ -234,7 +244,11 @@ if st.button("Запустить MVP", type="primary"):
                     with metric_col_3:
                         st.metric("Сходство эмбеддингов", f"{result.similarity:.4f}")
                     with metric_col_4:
-                        temporal_text = "∞" if result.temporal_distance == float("inf") else f"{result.temporal_distance:.4f}"
+                        temporal_text = (
+                            "∞"
+                            if result.temporal_distance == float("inf")
+                            else f"{result.temporal_distance:.4f}"
+                        )
                         st.metric("Временная дистанция", temporal_text)
 
                     st.progress(int(max(0, min(100, round(result.pronunciation_score)))))
@@ -259,7 +273,9 @@ if st.button("Запустить MVP", type="primary"):
                         if result.reason:
                             st.caption(result.reason)
                     elif result.status == "invalid_reference":
-                        st.error("Не удалось выполнить анализ: для слова не собраны корректные якоря.")
+                        st.error(
+                            "Не удалось выполнить анализ: для слова не собраны корректные якоря."
+                        )
                         if result.reason:
                             st.caption(result.reason)
                     else:
@@ -274,12 +290,14 @@ if st.button("Запустить MVP", type="primary"):
                         st.info(result.metric)
 
                     with st.expander("Калибровка"):
-                        st.write({
-                            "d100": result.d100,
-                            "d0": result.d0,
-                            "raw_distance": result.raw_distance,
-                            "alpha": raw_distance_alpha,
-                        })
+                        st.write(
+                            {
+                                "d100": result.d100,
+                                "d0": result.d0,
+                                "raw_distance": result.raw_distance,
+                                "alpha": raw_distance_alpha,
+                            }
+                        )
 
                     with st.expander("DEBUG"):
                         st.write(result_payload)

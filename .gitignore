@@ -1,6 +1,7 @@
 .venv
 plan.md
 diploma_pronunciation.egg-info
+.ruff_cache
 __pycache__
 *.pyc
 *.pyo

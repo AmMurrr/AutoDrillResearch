@@ -20,7 +20,9 @@ def configure_logging() -> None:
     """Configure process-wide console logging once for the project."""
     root_logger = logging.getLogger()
 
-    has_project_handler = any(getattr(handler, _HANDLER_MARK, False) for handler in root_logger.handlers)
+    has_project_handler = any(
+        getattr(handler, _HANDLER_MARK, False) for handler in root_logger.handlers
+    )
     if not has_project_handler:
         handler = logging.StreamHandler(stream=sys.stdout)
         handler.setFormatter(logging.Formatter(fmt=_MESSAGE_FORMAT, datefmt=_DATE_FORMAT))

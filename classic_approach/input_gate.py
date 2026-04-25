@@ -117,9 +117,8 @@ def validate_speech_signal(
 
     # Для single-word MVP длинный квазистационарный сигнал обычно означает
     # пустую запись/фон, а не целевое слово.
-    is_long_stationary = (
-        duration_sec >= float(stationary_duration_sec)
-        and dynamics_ratio < float(min_stationary_dynamics_ratio)
+    is_long_stationary = duration_sec >= float(stationary_duration_sec) and dynamics_ratio < float(
+        min_stationary_dynamics_ratio
     )
 
     is_valid = (

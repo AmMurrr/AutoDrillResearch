@@ -113,8 +113,14 @@ def _migrate_reference_paths_table(conn: sqlite3.Connection) -> None:
 
         label_value = str(row["label"] or "").strip() if "label" in legacy_columns else ""
         raw_word = str(row["word"] or "").strip() if "word" in legacy_columns else ""
-        word_value = _normalize_word(raw_word) or _normalize_word(label_value) or _guess_word_from_path(path_value)
-        created_at_value = str(row["created_at"] or "").strip() if "created_at" in legacy_columns else ""
+        word_value = (
+            _normalize_word(raw_word)
+            or _normalize_word(label_value)
+            or _guess_word_from_path(path_value)
+        )
+        created_at_value = (
+            str(row["created_at"] or "").strip() if "created_at" in legacy_columns else ""
+        )
 
         if created_at_value:
             conn.execute(
@@ -178,7 +184,9 @@ def list_reference_paths(word: str | None = None, limit: int | None = None) -> l
         conn.row_factory = sqlite3.Row
         rows = conn.execute(query, params).fetchall()
         result = [dict(row) for row in rows]
-        logger.info("Loaded %s reference paths (word=%s, limit=%s)", len(result), clean_word or None, limit)
+        logger.info(
+            "Loaded %s reference paths (word=%s, limit=%s)", len(result), clean_word or None, limit
+        )
         return result
 
 

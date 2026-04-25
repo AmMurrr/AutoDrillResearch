@@ -45,8 +45,7 @@ def _analyze_with_real_model(audio_path: str):
         )
     except OSError as exc:
         pytest.skip(
-            "Real wav2vec2 integration test requires locally cached "
-            f"{DEFAULT_MODEL_NAME}: {exc}"
+            f"Real wav2vec2 integration test requires locally cached {DEFAULT_MODEL_NAME}: {exc}"
         )
 
     _ANALYZE_CACHE[audio_path] = result

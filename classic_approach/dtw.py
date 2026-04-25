@@ -15,12 +15,14 @@ def _resolve_window(sakoe_chiba_radius: int | None) -> int | None:
     radius = int(sakoe_chiba_radius)
     return radius if radius > 0 else None
 
+
 # Преобразование 2D массива MFCC (n_mfcc x n_frames) в 2D массив (n_frames x n_mfcc) для DTW
 def _as_frame_matrix(features: np.ndarray) -> np.ndarray:
     arr = np.asarray(features, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError("DTW требует 2D массив признаков (n_mfcc x n_frames)")
     return arr.T
+
 
 # Вычисление DTW расстояния между двумя последовательностями MFCC
 def dtw_distance(

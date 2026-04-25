@@ -4,7 +4,12 @@ from tempfile import NamedTemporaryFile
 import streamlit as st
 from classic_approach.pipeline import analyze
 from app.logging_config import get_logger
-from scoring.anchor_calibration import describe_anchor_set, get_word_anchor_set, list_anchor_words, normalize_word
+from scoring.anchor_calibration import (
+    describe_anchor_set,
+    get_word_anchor_set,
+    list_anchor_words,
+    normalize_word,
+)
 
 
 logger = get_logger(__name__)
@@ -86,7 +91,9 @@ uploaded_attempt = st.file_uploader(
     type=["wav", "mp3", "m4a", "ogg", "flac"],
     key="classic_uploaded_attempt",
 )
-recorded_attempt = st.audio_input("Или запишите попытку через микрофон", key="classic_recorded_attempt")
+recorded_attempt = st.audio_input(
+    "Или запишите попытку через микрофон", key="classic_recorded_attempt"
+)
 
 st.markdown("### Параметры")
 col1, col2, col3, col4 = st.columns(4)
@@ -151,10 +158,14 @@ if st.button("Запустить MVP", type="primary"):
         att_exists = Path(resolved_attempt_path).exists()
 
         if not att_exists:
-            logger.warning("Classic page run rejected: attempt path does not exist (%s)", resolved_attempt_path)
+            logger.warning(
+                "Classic page run rejected: attempt path does not exist (%s)", resolved_attempt_path
+            )
             st.error("Путь к аудио пользователя не существует")
         elif not anchor_set.has_required_anchors:
-            logger.warning("Classic page run rejected: anchors are incomplete for word '%s'", anchor_word)
+            logger.warning(
+                "Classic page run rejected: anchors are incomplete for word '%s'", anchor_word
+            )
             st.error(
                 "Нельзя запустить анализ: для слова отсутствуют обязательные якоря. "
                 "Проверьте data/ref."
