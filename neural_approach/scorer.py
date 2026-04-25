@@ -32,6 +32,8 @@ class ScoringResult:
 	d0: float | None = None
 	moderate_raw_distance: float | None = None
 	fail_raw_distance: float | None = None
+	duration_distance: float | None = None
+	duration_score: float | None = None
 
 
 def _verdict_from_score(score: float) -> str:
@@ -276,6 +278,32 @@ def compute_scoring_result(
 		status=status,
 		reason=reason,
 	)
+
+
+def blend_with_duration_score(
+	result: ScoringResult,
+	duration_distance: float,
+	duration_score: float,
+	duration_weight: float = 0.85,
+) -> ScoringResult:
+	result.duration_distance = float(duration_distance)
+	result.duration_score = float(duration_score)
+
+	if result.status != "ok":
+		return result
+
+	weight = float(np.clip(float(duration_weight), 0.0, 1.0))
+	embedding_score = float(result.pronunciation_score)
+	blended_score = weight * float(duration_score) + (1.0 - weight) * embedding_score
+	result.pronunciation_score = float(np.clip(blended_score, 0.0, 100.0))
+	result.verdict = _verdict_from_score(result.pronunciation_score)
+	logger.info(
+		"Neural duration-aware score blended: embedding_score=%.2f duration_score=%.2f final=%.2f",
+		embedding_score,
+		float(duration_score),
+		result.pronunciation_score,
+	)
+	return result
 
 
 def aggregate_scoring_results(results: list[ScoringResult]) -> ScoringResult:

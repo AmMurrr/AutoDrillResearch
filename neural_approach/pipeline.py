@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import math
 from pathlib import Path
 
 import numpy as np
@@ -10,9 +11,11 @@ from scoring.anchor_calibration import (
 	build_anchor_distance_profile_from_distances,
 	build_anchor_distance_profiles,
 	describe_anchor_set,
+	fit_sigmoid_from_anchor_distances,
 	fit_sigmoid_from_anchor_profiles,
 	get_word_anchor_set,
 	normalize_word,
+	sigmoid_score,
 )
 
 from .embedding_comparator import compare_embeddings
@@ -20,6 +23,7 @@ from .input_gate import validate_speech_signal
 from .preprocessing import preprocess_audio
 from .scorer import (
 	ScoringResult,
+	blend_with_duration_score,
 	compute_anchor_profile_calibrated_scoring_result,
 	compute_raw_distance,
 	compute_scoring_result,
@@ -29,6 +33,7 @@ from .wav2vec_extractor import DEFAULT_MODEL_NAME, Wav2VecEmbeddings, extract_wa
 
 DEFAULT_MAX_ANCHORS_PER_CLASS = 12
 DEFAULT_RAW_DISTANCE_ALPHA = 0.65
+DEFAULT_DURATION_SCORE_WEIGHT = 0.85
 logger = get_logger(__name__)
 
 
@@ -119,6 +124,55 @@ def _compare_raw_distance(
 		alpha=raw_distance_alpha,
 	)
 	return comparison, raw_distance
+
+
+def _frame_count(embeddings: Wav2VecEmbeddings) -> int:
+	return int(embeddings.frame_embeddings.shape[0])
+
+
+def _median_log_frame_distance(
+	frame_count: int,
+	reference_frame_counts: list[int],
+	exclude_index: int | None = None,
+) -> float:
+	values = [
+		abs(math.log(max(int(frame_count), 1) / max(int(reference_count), 1)))
+		for index, reference_count in enumerate(reference_frame_counts)
+		if exclude_index is None or index != exclude_index
+	]
+	if not values:
+		return 0.0
+	return float(np.median(values))
+
+
+def _duration_score_against_perfect_anchors(
+	user_embeddings: Wav2VecEmbeddings,
+	perfect_embeddings: list[Wav2VecEmbeddings],
+	fail_embeddings: list[Wav2VecEmbeddings],
+) -> tuple[float, float]:
+	perfect_frame_counts = [_frame_count(embeddings) for embeddings in perfect_embeddings]
+	fail_frame_counts = [_frame_count(embeddings) for embeddings in fail_embeddings]
+
+	if not perfect_frame_counts or not fail_frame_counts:
+		return float("inf"), 0.0
+
+	perfect_duration_distances = [
+		_median_log_frame_distance(frame_count, perfect_frame_counts, exclude_index=index)
+		for index, frame_count in enumerate(perfect_frame_counts)
+	]
+	fail_duration_distances = [
+		_median_log_frame_distance(frame_count, perfect_frame_counts)
+		for frame_count in fail_frame_counts
+	]
+	duration_params = fit_sigmoid_from_anchor_distances(
+		distances_100=perfect_duration_distances,
+		distances_0=fail_duration_distances,
+	)
+	user_duration_distance = _median_log_frame_distance(
+		_frame_count(user_embeddings),
+		perfect_frame_counts,
+	)
+	return user_duration_distance, sigmoid_score(user_duration_distance, duration_params)
 
 
 def _distance_between_anchor_paths(
@@ -387,6 +441,7 @@ def analyze(
 	user_similarity_to_perfect: list[float] = []
 	user_temporal_to_perfect: list[float] = []
 	user_raw_to_perfect: list[float] = []
+	perfect_anchor_embeddings: list[Wav2VecEmbeddings] = []
 
 	for perfect_path in valid_perfect_paths:
 		perfect_embeddings = _extract_anchor_embeddings(
@@ -395,6 +450,7 @@ def analyze(
 			device=device,
 			hf_token=hf_token,
 		)
+		perfect_anchor_embeddings.append(perfect_embeddings)
 		comparison, raw_distance = _compare_raw_distance(
 			embeddings_a=user_embeddings,
 			embeddings_b=perfect_embeddings,
@@ -437,6 +493,7 @@ def analyze(
 			user_raw_to_moderate.append(float(raw_distance))
 
 	user_raw_to_fail: list[float] = []
+	fail_anchor_embeddings: list[Wav2VecEmbeddings] = []
 	for fail_path in valid_fail_paths:
 		fail_embeddings = _extract_anchor_embeddings(
 			anchor_path=fail_path,
@@ -444,6 +501,7 @@ def analyze(
 			device=device,
 			hf_token=hf_token,
 		)
+		fail_anchor_embeddings.append(fail_embeddings)
 		_, raw_distance = _compare_raw_distance(
 			embeddings_a=user_embeddings,
 			embeddings_b=fail_embeddings,
@@ -482,6 +540,17 @@ def analyze(
 		calibration_params=calibration_params,
 		status="ok",
 		reason="",
+	)
+	duration_distance, duration_score = _duration_score_against_perfect_anchors(
+		user_embeddings=user_embeddings,
+		perfect_embeddings=perfect_anchor_embeddings,
+		fail_embeddings=fail_anchor_embeddings,
+	)
+	result = blend_with_duration_score(
+		result,
+		duration_distance=duration_distance,
+		duration_score=duration_score,
+		duration_weight=DEFAULT_DURATION_SCORE_WEIGHT,
 	)
 
 	if not result.reason:
