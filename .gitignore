@@ -24,3 +24,6 @@ classic.md
 sakoe_chiba_band.md
 change_score.md
 data/eval
+evaluation/data.csv
+evaluation/visual/score_results.csv
+evaluation/visual/score_graph.png
