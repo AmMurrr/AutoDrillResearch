@@ -31,9 +31,9 @@ from .scorer import (
 from .wav2vec_extractor import DEFAULT_MODEL_NAME, Wav2VecEmbeddings, extract_wav2vec_embeddings
 
 
-DEFAULT_MAX_ANCHORS_PER_CLASS = 12
+DEFAULT_MAX_ANCHORS_PER_CLASS = 20
 DEFAULT_RAW_DISTANCE_ALPHA = 0.65
-DEFAULT_DURATION_SCORE_WEIGHT = 0.85
+DEFAULT_DURATION_SCORE_WEIGHT = 0.1
 logger = get_logger(__name__)
 
 

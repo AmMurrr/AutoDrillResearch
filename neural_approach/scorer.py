@@ -34,6 +34,7 @@ class ScoringResult:
     fail_raw_distance: float | None = None
     duration_distance: float | None = None
     duration_score: float | None = None
+    embedding_score: float | None = None
 
 
 def _verdict_from_score(score: float) -> str:
@@ -300,6 +301,7 @@ def blend_with_duration_score(
 
     weight = float(np.clip(float(duration_weight), 0.0, 1.0))
     embedding_score = float(result.pronunciation_score)
+    result.embedding_score = embedding_score
     blended_score = weight * float(duration_score) + (1.0 - weight) * embedding_score
     result.pronunciation_score = float(np.clip(blended_score, 0.0, 100.0))
     result.verdict = _verdict_from_score(result.pronunciation_score)

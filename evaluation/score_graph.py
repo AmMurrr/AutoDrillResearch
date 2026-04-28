@@ -32,7 +32,7 @@ VISUAL_DIR = Path(__file__).resolve().parent / "visual"
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg"}
 CLASS_ORDER = ("perfect", "moderate", "fail")
 APPROACH_ORDER = ("classic", "neural")
-WORDS_TO_PLOT = ("and",)
+WORDS_TO_PLOT = ("that",)
 CLASS_COLORS = {
     "perfect": "#2e7d32",
     "moderate": "#f9a825",
