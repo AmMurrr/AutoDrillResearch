@@ -32,6 +32,7 @@ VISUAL_DIR = Path(__file__).resolve().parent / "visual"
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg"}
 CLASS_ORDER = ("perfect", "moderate", "fail")
 APPROACH_ORDER = ("classic", "neural")
+WORDS_TO_PLOT = ("and",)
 CLASS_COLORS = {
     "perfect": "#2e7d32",
     "moderate": "#f9a825",
@@ -98,10 +99,9 @@ def load_items(eval_dir: Path) -> dict[str, list[EvaluationItem]]:
         raise NotADirectoryError(f"Evaluation path is not a directory: {eval_dir}")
 
     items_by_word: dict[str, list[EvaluationItem]] = {}
-    word_dirs = sorted(
-        (path for path in eval_dir.iterdir() if path.is_dir()),
-        key=lambda path: path.name,
-    )
+    word_dirs = [
+        eval_dir / word for word in WORDS_TO_PLOT if (eval_dir / word).is_dir()
+    ]
     for word_dir in word_dirs:
         word = word_dir.name
         items: list[EvaluationItem] = []

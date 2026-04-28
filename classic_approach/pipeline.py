@@ -26,7 +26,7 @@ from .scorer import (
 )
 
 
-DEFAULT_MAX_ANCHORS_PER_CLASS = 12
+DEFAULT_MAX_ANCHORS_PER_CLASS = 20
 logger = get_logger(__name__)
 
 
