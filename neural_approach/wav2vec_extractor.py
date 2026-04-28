@@ -12,6 +12,7 @@ from transformers import AutoFeatureExtractor, AutoModel
 
 
 DEFAULT_MODEL_NAME = "facebook/wav2vec2-base"
+DEFAULT_EMBEDDING_LAYER = 6
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCAL_MODELS_DIR = PROJECT_ROOT / "models"
 HF_TOKEN_ENV_VAR = "HF_TOKEN"
@@ -25,6 +26,7 @@ class Wav2VecEmbeddings:
     sample_rate: int
     model_name: str
     device: str
+    embedding_layer: int | None = None
 
 
 def statistical_pooling(frame_embeddings: np.ndarray) -> np.ndarray:
@@ -155,6 +157,25 @@ def resolve_model_name_or_path(model_name: str) -> str:
     return requested
 
 
+def _select_frame_embeddings(outputs, embedding_layer: int | None):
+    if embedding_layer is None:
+        return outputs.last_hidden_state
+
+    hidden_states = outputs.hidden_states
+    if hidden_states is None:
+        raise ValueError("Model output does not contain hidden states")
+
+    layer_index = int(embedding_layer)
+    if layer_index < 0:
+        layer_index += len(hidden_states)
+    if layer_index < 0 or layer_index >= len(hidden_states):
+        raise ValueError(
+            f"embedding_layer={embedding_layer} is outside available hidden states "
+            f"0..{len(hidden_states) - 1}"
+        )
+    return hidden_states[layer_index]
+
+
 @lru_cache(maxsize=8)
 def _load_model_bundle(model_name: str, device_str: str, hf_token: str | None):
     resolved_model = resolve_model_name_or_path(model_name)
@@ -188,8 +209,14 @@ def extract_wav2vec_embeddings(
     model_name: str = DEFAULT_MODEL_NAME,
     device: str | None = None,
     hf_token: str | None = None,
+    embedding_layer: int | None = DEFAULT_EMBEDDING_LAYER,
 ) -> Wav2VecEmbeddings:
-    logger.info("Extracting wav2vec embeddings: model=%s sample_rate=%s", model_name, sample_rate)
+    logger.info(
+        "Extracting wav2vec embeddings: model=%s sample_rate=%s layer=%s",
+        model_name,
+        sample_rate,
+        embedding_layer,
+    )
     if sample_rate != 16000:
         raise ValueError("wav2vec2-base expects 16 kHz audio after preprocessing")
 
@@ -217,10 +244,19 @@ def extract_wav2vec_embeddings(
         attention_mask = attention_mask.to(resolved_device)
 
     with torch.inference_mode():
-        outputs = model(input_values=input_values, attention_mask=attention_mask)
+        outputs = model(
+            input_values=input_values,
+            attention_mask=attention_mask,
+            output_hidden_states=embedding_layer is not None,
+        )
 
     frame_embeddings = (
-        outputs.last_hidden_state.squeeze(0).detach().cpu().numpy().astype(np.float32)
+        _select_frame_embeddings(outputs, embedding_layer)
+        .squeeze(0)
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
     )
     pooled_embedding = statistical_pooling(frame_embeddings)
     logger.info(
@@ -236,4 +272,5 @@ def extract_wav2vec_embeddings(
         sample_rate=sample_rate,
         model_name=model_name,
         device=resolved_device.type,
+        embedding_layer=embedding_layer,
     )
