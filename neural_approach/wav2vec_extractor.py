@@ -12,6 +12,8 @@ from transformers import AutoFeatureExtractor, AutoModel
 
 
 DEFAULT_MODEL_NAME = "facebook/wav2vec2-base"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOCAL_MODELS_DIR = PROJECT_ROOT / "models"
 HF_TOKEN_ENV_VAR = "HF_TOKEN"
 logger = get_logger(__name__)
 
@@ -123,17 +125,53 @@ def _use_local_files_only() -> bool:
     return False
 
 
+def _local_model_dir_name(model_name: str) -> str:
+    return model_name.strip().replace("/", "-")
+
+
+def _has_transformers_model_files(model_dir: Path) -> bool:
+    if not model_dir.is_dir():
+        return False
+
+    has_config = (model_dir / "config.json").is_file()
+    has_preprocessor = (model_dir / "preprocessor_config.json").is_file()
+    has_weights = any(
+        (model_dir / filename).is_file()
+        for filename in ("pytorch_model.bin", "model.safetensors")
+    )
+    return has_config and has_preprocessor and has_weights
+
+
+def resolve_model_name_or_path(model_name: str) -> str:
+    requested = model_name.strip() or DEFAULT_MODEL_NAME
+    requested_path = Path(requested).expanduser()
+    if requested_path.exists():
+        return str(requested_path)
+
+    local_model_dir = LOCAL_MODELS_DIR / _local_model_dir_name(requested)
+    if _has_transformers_model_files(local_model_dir):
+        return str(local_model_dir)
+
+    return requested
+
+
 @lru_cache(maxsize=8)
 def _load_model_bundle(model_name: str, device_str: str, hf_token: str | None):
-    logger.info("Loading wav2vec bundle: model=%s device=%s", model_name, device_str)
-    local_files_only = _use_local_files_only()
-    feature_extractor = AutoFeatureExtractor.from_pretrained(
+    resolved_model = resolve_model_name_or_path(model_name)
+    local_files_only = _use_local_files_only() or Path(resolved_model).exists()
+    logger.info(
+        "Loading wav2vec bundle: model=%s resolved_model=%s device=%s",
         model_name,
+        resolved_model,
+        device_str,
+    )
+    feature_extractor = AutoFeatureExtractor.from_pretrained(
+        resolved_model,
         token=hf_token,
         local_files_only=local_files_only,
     )
     model = AutoModel.from_pretrained(
-        model_name,
+        resolved_model,
         token=hf_token,
         local_files_only=local_files_only,
         use_safetensors=False,

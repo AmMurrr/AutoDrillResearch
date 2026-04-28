@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 import torch
 
-from neural_approach.wav2vec_extractor import extract_wav2vec_embeddings, statistical_pooling
+from neural_approach.wav2vec_extractor import (
+    DEFAULT_MODEL_NAME,
+    extract_wav2vec_embeddings,
+    resolve_model_name_or_path,
+    statistical_pooling,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -54,6 +59,30 @@ def test_extract_wav2vec_embeddings_with_mocked_model(monkeypatch) -> None:
     assert result.sample_rate == 16000
     assert result.model_name == "fake/model"
     assert result.device == "cpu"
+
+
+def test_resolve_model_name_prefers_downloaded_project_model(monkeypatch, tmp_path) -> None:
+    local_model_dir = tmp_path / "facebook-wav2vec2-base"
+    local_model_dir.mkdir()
+    (local_model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (local_model_dir / "preprocessor_config.json").write_text("{}", encoding="utf-8")
+    (local_model_dir / "pytorch_model.bin").write_bytes(b"weights")
+
+    monkeypatch.setattr("neural_approach.wav2vec_extractor.LOCAL_MODELS_DIR", tmp_path)
+
+    assert resolve_model_name_or_path(DEFAULT_MODEL_NAME) == str(local_model_dir)
+
+
+def test_resolve_model_name_falls_back_to_hub_name_for_incomplete_local_model(
+    monkeypatch, tmp_path
+) -> None:
+    local_model_dir = tmp_path / "facebook-wav2vec2-base"
+    local_model_dir.mkdir()
+    (local_model_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr("neural_approach.wav2vec_extractor.LOCAL_MODELS_DIR", tmp_path)
+
+    assert resolve_model_name_or_path(DEFAULT_MODEL_NAME) == DEFAULT_MODEL_NAME
 
 
 def test_statistical_pooling_concatenates_mean_and_std() -> None:

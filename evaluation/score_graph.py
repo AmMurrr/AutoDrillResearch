@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass
+import math
 import os
 from pathlib import Path
 import sys
@@ -26,11 +27,9 @@ from classic_approach.pipeline import analyze as analyze_classic  # noqa: E402
 from neural_approach.pipeline import analyze as analyze_neural  # noqa: E402
 
 
-DATA_CSV = Path(__file__).resolve().parent / "data.csv"
+EVAL_DIR = PROJECT_ROOT / "data" / "eval"
 VISUAL_DIR = Path(__file__).resolve().parent / "visual"
-DEFAULT_RESULTS_CSV = VISUAL_DIR / "score_results.csv"
-DEFAULT_PLOT_PATH = VISUAL_DIR / "score_graph.png"
-DEFAULT_WORD = "there"
+AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg"}
 CLASS_ORDER = ("perfect", "moderate", "fail")
 APPROACH_ORDER = ("classic", "neural")
 CLASS_COLORS = {
@@ -60,6 +59,15 @@ class RunResult:
     verdict: str
     reason: str
     elapsed_seconds: float
+    raw_distance: float | None = None
+    moderate_distance: float | None = None
+    fail_distance: float | None = None
+    duration_distance: float | None = None
+    duration_score: float | None = None
+    embedding_score: float | None = None
+
+
+RunnerOutput = tuple[float, str, str, str, dict[str, float | None]]
 
 
 def _resolve_audio_path(path_value: str) -> Path:
@@ -69,60 +77,67 @@ def _resolve_audio_path(path_value: str) -> Path:
     return PROJECT_ROOT / audio_path
 
 
-def _infer_word(path_value: str, fallback: str) -> str:
-    parts = Path(path_value).parts
-    if "eval" in parts:
-        eval_index = parts.index("eval")
-        if len(parts) > eval_index + 1:
-            return parts[eval_index + 1]
-    return fallback
+def _path_for_csv(audio_path: Path) -> str:
+    try:
+        return audio_path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return audio_path.as_posix()
 
 
-def load_items(csv_path: Path, default_word: str) -> list[EvaluationItem]:
-    with csv_path.open("r", newline="", encoding="utf-8") as file:
-        reader = csv.DictReader(file)
-        fieldnames = set(reader.fieldnames or ())
-        required_fields = {"id", "path", "class"}
-        missing_fields = required_fields - fieldnames
-        if missing_fields:
-            missing = ", ".join(sorted(missing_fields))
-            raise ValueError(f"{csv_path} is missing required columns: {missing}")
+def _is_audio_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS
 
+
+def load_items(eval_dir: Path) -> dict[str, list[EvaluationItem]]:
+    eval_dir = eval_dir.expanduser()
+    if not eval_dir.is_absolute():
+        eval_dir = PROJECT_ROOT / eval_dir
+    if not eval_dir.exists():
+        raise FileNotFoundError(f"Evaluation directory does not exist: {eval_dir}")
+    if not eval_dir.is_dir():
+        raise NotADirectoryError(f"Evaluation path is not a directory: {eval_dir}")
+
+    items_by_word: dict[str, list[EvaluationItem]] = {}
+    word_dirs = sorted(
+        (path for path in eval_dir.iterdir() if path.is_dir()),
+        key=lambda path: path.name,
+    )
+    for word_dir in word_dirs:
+        word = word_dir.name
         items: list[EvaluationItem] = []
-        for row_number, row in enumerate(reader, start=2):
-            raw_path = (row.get("path") or "").strip()
-            raw_class = (row.get("class") or "").strip().lower()
-            raw_id = (row.get("id") or "").strip()
+        next_item_id = 1
 
-            if not raw_path:
-                raise ValueError(f"{csv_path}:{row_number} has empty path")
-            if raw_class not in CLASS_ORDER:
-                raise ValueError(
-                    f"{csv_path}:{row_number} has unsupported class '{raw_class}'"
+        for class_name in CLASS_ORDER:
+            class_dir = word_dir / class_name
+            if not class_dir.exists():
+                continue
+            if not class_dir.is_dir():
+                raise NotADirectoryError(
+                    f"Evaluation class path is not a directory: {class_dir}"
                 )
 
-            try:
-                item_id = int(raw_id)
-            except ValueError as exc:
-                raise ValueError(f"{csv_path}:{row_number} has invalid id '{raw_id}'") from exc
-
-            audio_path = _resolve_audio_path(raw_path)
-            if not audio_path.exists():
-                raise FileNotFoundError(f"Audio file does not exist: {audio_path}")
-
-            items.append(
-                EvaluationItem(
-                    item_id=item_id,
-                    path=raw_path,
-                    expected_class=raw_class,
-                    word=_infer_word(raw_path, default_word),
-                )
+            audio_files = sorted(
+                (path for path in class_dir.iterdir() if _is_audio_file(path)),
+                key=lambda path: path.name.lower(),
             )
+            for audio_path in audio_files:
+                items.append(
+                    EvaluationItem(
+                        item_id=next_item_id,
+                        path=_path_for_csv(audio_path),
+                        expected_class=class_name,
+                        word=word,
+                    )
+                )
+                next_item_id += 1
 
-    return items
+        if items:
+            items_by_word[word] = items
+
+    return items_by_word
 
 
-def _run_classic(item: EvaluationItem) -> tuple[float, str, str, str]:
+def _run_classic(item: EvaluationItem) -> RunnerOutput:
     result = analyze_classic(
         user_audio_path=str(_resolve_audio_path(item.path)),
         transcript=item.word,
@@ -133,10 +148,18 @@ def _run_classic(item: EvaluationItem) -> tuple[float, str, str, str]:
         result.status,
         result.verdict,
         result.reason,
+        {
+            "raw_distance": float(result.distance),
+            "moderate_distance": result.moderate_distance,
+            "fail_distance": result.fail_distance,
+            "duration_distance": None,
+            "duration_score": None,
+            "embedding_score": None,
+        },
     )
 
 
-def _run_neural(item: EvaluationItem) -> tuple[float, str, str, str]:
+def _run_neural(item: EvaluationItem) -> RunnerOutput:
     result = analyze_neural(
         user_audio_path=str(_resolve_audio_path(item.path)),
         transcript=item.word,
@@ -147,6 +170,14 @@ def _run_neural(item: EvaluationItem) -> tuple[float, str, str, str]:
         result.status,
         result.verdict,
         result.reason,
+        {
+            "raw_distance": result.raw_distance,
+            "moderate_distance": result.moderate_raw_distance,
+            "fail_distance": result.fail_raw_distance,
+            "duration_distance": result.duration_distance,
+            "duration_score": result.duration_score,
+            "embedding_score": getattr(result, "embedding_score", None),
+        },
     )
 
 
@@ -161,12 +192,20 @@ def run_evaluation(items: Iterable[EvaluationItem]) -> list[RunResult]:
         for approach in APPROACH_ORDER:
             started_at = perf_counter()
             try:
-                score, status, verdict, reason = runners[approach](item)
+                score, status, verdict, reason, diagnostics = runners[approach](item)
             except Exception as exc:
-                score = 0.0
+                score = float("nan")
                 status = "error"
                 verdict = "error"
                 reason = f"{type(exc).__name__}: {exc}"
+                diagnostics = {
+                    "raw_distance": None,
+                    "moderate_distance": None,
+                    "fail_distance": None,
+                    "duration_distance": None,
+                    "duration_score": None,
+                    "embedding_score": None,
+                }
 
             elapsed_seconds = perf_counter() - started_at
             results.append(
@@ -181,11 +220,18 @@ def run_evaluation(items: Iterable[EvaluationItem]) -> list[RunResult]:
                     verdict=verdict,
                     reason=reason,
                     elapsed_seconds=elapsed_seconds,
+                    raw_distance=diagnostics["raw_distance"],
+                    moderate_distance=diagnostics["moderate_distance"],
+                    fail_distance=diagnostics["fail_distance"],
+                    duration_distance=diagnostics["duration_distance"],
+                    duration_score=diagnostics["duration_score"],
+                    embedding_score=diagnostics["embedding_score"],
                 )
             )
             print(
                 f"{approach:7s} id={item.item_id:02d} "
-                f"class={item.expected_class:8s} score={score:6.2f} status={status}"
+                f"class={item.expected_class:8s} score={_format_score_for_log(score)} "
+                f"status={status}"
             )
 
     return results
@@ -207,6 +253,12 @@ def save_results(results: list[RunResult], output_path: Path) -> None:
                 "verdict",
                 "reason",
                 "elapsed_seconds",
+                "raw_distance",
+                "moderate_distance",
+                "fail_distance",
+                "duration_distance",
+                "duration_score",
+                "embedding_score",
             ],
         )
         writer.writeheader()
@@ -218,13 +270,41 @@ def save_results(results: list[RunResult], output_path: Path) -> None:
                     "word": result.word,
                     "class": result.expected_class,
                     "approach": result.approach,
-                    "score": f"{result.score:.6f}",
+                    "score": _format_optional_float(result.score),
                     "status": result.status,
                     "verdict": result.verdict,
                     "reason": result.reason,
                     "elapsed_seconds": f"{result.elapsed_seconds:.6f}",
+                    "raw_distance": _format_optional_float(result.raw_distance),
+                    "moderate_distance": _format_optional_float(result.moderate_distance),
+                    "fail_distance": _format_optional_float(result.fail_distance),
+                    "duration_distance": _format_optional_float(result.duration_distance),
+                    "duration_score": _format_optional_float(result.duration_score),
+                    "embedding_score": _format_optional_float(result.embedding_score),
                 }
             )
+
+
+def _format_optional_float(value: float | None) -> str:
+    if value is None:
+        return ""
+    if not math.isfinite(float(value)):
+        return ""
+    return f"{float(value):.6f}"
+
+
+def _format_score_for_log(score: float) -> str:
+    if not math.isfinite(float(score)):
+        return "   n/a"
+    return f"{score:6.2f}"
+
+
+def _safe_filename(value: str) -> str:
+    normalized = "".join(
+        char.lower() if char.isalnum() or char in "-_" else "_"
+        for char in value.strip()
+    )
+    return normalized.strip("_") or "word"
 
 
 def _mean(values: list[float]) -> float | None:
@@ -235,6 +315,7 @@ def _mean(values: list[float]) -> float | None:
 
 def save_score_plot(results: list[RunResult], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    word = results[0].word if results else output_path.stem
 
     fig, ax = plt.subplots(figsize=(12, 6), constrained_layout=True)
     x_positions: dict[tuple[str, str], float] = {}
@@ -256,7 +337,9 @@ def save_score_plot(results: list[RunResult], output_path: Path) -> None:
                 for result in results
                 if result.approach == approach and result.expected_class == class_name
             ]
-            scores = [result.score for result in group_results]
+            scores = [
+                result.score for result in group_results if math.isfinite(result.score)
+            ]
             if not scores:
                 continue
 
@@ -299,7 +382,7 @@ def save_score_plot(results: list[RunResult], output_path: Path) -> None:
 
     separator_x = len(CLASS_ORDER) - 0.5
     ax.axvline(separator_x, color="#888888", linestyle="--", linewidth=1.0, alpha=0.7)
-    ax.set_title("Pronunciation scores for 'there'")
+    ax.set_title(f"Pronunciation scores for '{word}'")
     ax.set_ylabel("Score")
     ax.set_ylim(-2, 104)
     ax.set_xticks(tick_positions)
@@ -322,43 +405,45 @@ def save_score_plot(results: list[RunResult], output_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run classic and neural pronunciation scoring for evaluation/data.csv."
+        description=(
+            "Run classic and neural pronunciation scoring for audio files in data/eval."
+        )
     )
     parser.add_argument(
-        "--data-csv",
+        "--eval-dir",
         type=Path,
-        default=DATA_CSV,
-        help="CSV with id,path,class columns.",
+        default=EVAL_DIR,
+        help="Directory with <word>/<perfect|moderate|fail> audio files.",
     )
     parser.add_argument(
-        "--word",
-        default=DEFAULT_WORD,
-        help="Fallback transcript word when it cannot be inferred from path.",
-    )
-    parser.add_argument(
-        "--results-csv",
+        "--output-dir",
         type=Path,
-        default=DEFAULT_RESULTS_CSV,
-        help="Where to save per-run scores.",
-    )
-    parser.add_argument(
-        "--plot",
-        type=Path,
-        default=DEFAULT_PLOT_PATH,
-        help="Where to save the matplotlib graph.",
+        default=VISUAL_DIR,
+        help="Directory where per-word CSV files and plots are saved.",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    items = load_items(args.data_csv, default_word=args.word)
-    results = run_evaluation(items)
-    save_results(results, args.results_csv)
-    save_score_plot(results, args.plot)
+    items_by_word = load_items(args.eval_dir)
+    if not items_by_word:
+        raise ValueError(
+            f"No audio files found in evaluation directory: {args.eval_dir}"
+        )
 
-    print(f"Saved results: {args.results_csv}")
-    print(f"Saved plot: {args.plot}")
+    for word, items in items_by_word.items():
+        safe_word = _safe_filename(word)
+        results_csv = args.output_dir / f"score_results_{safe_word}.csv"
+        plot_path = args.output_dir / f"score_graph_{safe_word}.png"
+
+        print(f"\nWord '{word}': {len(items)} audio files")
+        results = run_evaluation(items)
+        save_results(results, results_csv)
+        save_score_plot(results, plot_path)
+
+        print(f"Saved results: {results_csv}")
+        print(f"Saved plot: {plot_path}")
 
 
 if __name__ == "__main__":
