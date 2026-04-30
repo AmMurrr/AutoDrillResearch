@@ -29,3 +29,6 @@ evaluation/visual/score_results.csv
 evaluation/visual/score_graph.png
 models/
 evaluation/visual/
+resources/
+metric.md
+evaluation/visual.zip
