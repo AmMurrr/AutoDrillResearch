@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import os
 
 import numpy as np
 import pytest
-import torch
 
 from neural_approach.wav2vec_extractor import (
     DEFAULT_MODEL_NAME,
     extract_wav2vec_embeddings,
+    resolve_hf_token,
     resolve_model_name_or_path,
     statistical_pooling,
 )
@@ -25,40 +25,36 @@ def test_extract_wav2vec_embeddings_input_validation() -> None:
         extract_wav2vec_embeddings(np.array([], dtype=np.float32), sample_rate=16000)
 
 
-def test_extract_wav2vec_embeddings_with_mocked_model(monkeypatch) -> None:
-    class FakeFeatureExtractor:
-        def __call__(self, speech, sampling_rate, return_tensors, return_attention_mask):
-            del return_tensors
-            del return_attention_mask
-            assert sampling_rate == 16000
-            input_values = torch.tensor(speech, dtype=torch.float32).unsqueeze(0)
-            attention_mask = torch.ones_like(input_values, dtype=torch.long)
-            return {"input_values": input_values, "attention_mask": attention_mask}
+def test_extract_wav2vec_embeddings_with_real_model() -> None:
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    os.environ.setdefault("DISABLE_SAFETENSORS_CONVERSION", "1")
 
-    class FakeModel:
-        def __call__(self, input_values, attention_mask=None):
-            del attention_mask
-            hidden = input_values.unsqueeze(-1).repeat(1, 1, 4)
-            return SimpleNamespace(last_hidden_state=hidden)
-
-    monkeypatch.setattr(
-        "neural_approach.wav2vec_extractor._resolve_device",
-        lambda _device=None: torch.device("cpu"),
+    samples = np.sin(2 * np.pi * 220 * np.arange(16000, dtype=np.float32) / 16000).astype(
+        np.float32
     )
-    monkeypatch.setattr(
-        "neural_approach.wav2vec_extractor._load_model_bundle",
-        lambda _model_name, _device_str, _hf_token: (FakeFeatureExtractor(), FakeModel()),
-    )
+    try:
+        result = extract_wav2vec_embeddings(
+            samples,
+            sample_rate=16000,
+            model_name=DEFAULT_MODEL_NAME,
+            device="cpu",
+            hf_token=resolve_hf_token(None),
+        )
+    except OSError as exc:
+        pytest.skip(
+            f"Real wav2vec2 extractor test requires locally cached {DEFAULT_MODEL_NAME}: {exc}"
+        )
 
-    samples = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
-    result = extract_wav2vec_embeddings(samples, sample_rate=16000, model_name="fake/model")
-
-    assert result.frame_embeddings.shape == (4, 4)
-    assert result.pooled_embedding.shape == (8,)
+    assert result.frame_embeddings.ndim == 2
+    assert result.frame_embeddings.shape[0] > 0
+    assert result.frame_embeddings.shape[1] > 0
+    assert result.pooled_embedding.shape == (result.frame_embeddings.shape[1] * 2,)
     assert np.allclose(result.pooled_embedding, statistical_pooling(result.frame_embeddings))
     assert result.sample_rate == 16000
-    assert result.model_name == "fake/model"
+    assert result.model_name == DEFAULT_MODEL_NAME
     assert result.device == "cpu"
+    assert result.embedding_layer == 6
 
 
 def test_resolve_model_name_prefers_downloaded_project_model(monkeypatch, tmp_path) -> None:

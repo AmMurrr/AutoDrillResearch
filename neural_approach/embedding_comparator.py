@@ -114,7 +114,6 @@ def compare_embeddings(
     user_frames, user_pooled = _embedding_parts(user_embeddings, user_pooled_embedding)
     ref_frames, ref_pooled = _embedding_parts(reference_embeddings, reference_pooled_embedding)
 
-    # Косинусное сходство естественно лежит в диапазоне [-1, 1].
     similarity = _cosine_similarity(user_pooled, ref_pooled)
 
     temporal_distance = _dtw_temporal_distance(

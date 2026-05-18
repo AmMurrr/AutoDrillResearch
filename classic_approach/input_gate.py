@@ -115,8 +115,7 @@ def validate_speech_signal(
     spectral_flatness = _spectral_flatness_mean(waveform, sample_rate=sample_rate)
     clipping_ratio = float(np.mean(np.abs(waveform) >= float(clipping_threshold)))
 
-    # Для single-word MVP длинный квазистационарный сигнал обычно означает
-    # пустую запись/фон, а не целевое слово.
+
     is_long_stationary = duration_sec >= float(stationary_duration_sec) and dynamics_ratio < float(
         min_stationary_dynamics_ratio
     )

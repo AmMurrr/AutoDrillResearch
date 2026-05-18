@@ -29,8 +29,8 @@ TIME_METRICS = (
     ("cpu_p95_seconds", "CPU p95"),
 )
 RAM_METRICS = (
-    ("cold_start_ram_mb", "Cold start"),
-    ("warm_start_ram_mb", "Warm start"),
+    ("cold_start_ram_mb", "Cold peak RSS"),
+    ("warm_start_ram_mb", "Warm peak RSS"),
 )
 
 
@@ -118,8 +118,12 @@ def load_resource_data(resources_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame,
             "approach",
             "cold_start_word",
             "cold_start_path",
+            "cold_start_baseline_ram_mb",
             "cold_start_ram_mb",
+            "cold_start_delta_peak_ram_mb",
+            "warm_start_baseline_ram_mb",
             "warm_start_ram_mb",
+            "warm_start_delta_peak_ram_mb",
         },
         ram_summary_path,
     )
@@ -267,7 +271,7 @@ def plot_ram_summary(data: pd.DataFrame, output_path: Path) -> None:
         )
         _bar_label(ax, bars, "%.1f")
 
-    ax.set_title("RAM usage: cold start vs warm start")
+    ax.set_title("Peak RAM usage: cold start vs warm start")
     ax.set_ylabel("MB")
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
@@ -365,7 +369,7 @@ def write_notes(
 Сравнивает медиану и 95-й перцентиль wall time и CPU time по двум подходам. Neural быстрее по медианному wall time: {neural_wall:.3f} с против {classic_wall:.3f} с у classic. CPU time близок: {neural_cpu:.3f} с у neural и {classic_cpu:.3f} с у classic.
 
 ## resource_ram_summary.png
-Сравнивает RAM для холодного и теплого запуска. На холодном запуске neural требует {neural_cold_ram:.1f} MB против {classic_cold_ram:.1f} MB у classic. В теплом режиме neural занимает {neural_warm_ram:.1f} MB против {classic_warm_ram:.1f} MB у classic, то есть примерно в {_ratio(neural_warm_ram, classic_warm_ram):.2f} раза больше.
+Сравнивает peak RSS во время обработки для холодного и теплого запуска. На холодном запуске neural достигает {neural_cold_ram:.1f} MB против {classic_cold_ram:.1f} MB у classic. В теплом режиме neural достигает {neural_warm_ram:.1f} MB против {classic_warm_ram:.1f} MB у classic, то есть примерно в {_ratio(neural_warm_ram, classic_warm_ram):.2f} раза больше.
 
 ## resource_time_by_word.png
 Показывает медианное время обработки отдельно по словам. Этот график нужен, чтобы увидеть, зависит ли преимущество подхода от конкретного слова, а не только от общей агрегированной медианы.

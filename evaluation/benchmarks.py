@@ -77,7 +77,9 @@ class ColdRamResult:
     cold_start_item_id: int
     cold_start_word: str
     cold_start_path: str
+    cold_start_baseline_ram_mb: float
     cold_start_ram_mb: float
+    cold_start_delta_peak_ram_mb: float
     cold_error: str
 
 
@@ -220,8 +222,8 @@ def enable_benchmark_calibration_caches(approaches: Iterable[str] = APPROACH_ORD
         if approach in _CALIBRATION_CACHED_APPROACHES:
             continue
         pipeline = _pipeline_for_approach(approach)
-        pipeline._build_anchor_calibration = lru_cache(maxsize=None)(  # noqa: SLF001
-            pipeline._build_anchor_calibration  # noqa: SLF001
+        pipeline._build_anchor_calibration = lru_cache(maxsize=None)(  
+            pipeline._build_anchor_calibration  
         )
         _CALIBRATION_CACHED_APPROACHES.add(approach)
 
@@ -250,7 +252,7 @@ def measure_call(
     error = ""
     try:
         result = fn()
-    except Exception as exc:  # noqa: BLE001 - benchmark must record failed runs.
+    except Exception as exc:  
         error = f"{type(exc).__name__}: {exc}"
     finally:
         cpu_seconds = time.process_time() - cpu_start
@@ -332,7 +334,9 @@ def measure_cold_ram(
                 cold_start_item_id=cold_item.item_id,
                 cold_start_word=cold_item.word,
                 cold_start_path=cold_item.path,
-                cold_start_ram_mb=measured.ram_delta_peak_mb,
+                cold_start_baseline_ram_mb=measured.ram_baseline_mb,
+                cold_start_ram_mb=measured.ram_peak_mb,
+                cold_start_delta_peak_ram_mb=measured.ram_delta_peak_mb,
                 cold_error=measured.error,
             )
         )
@@ -479,7 +483,9 @@ def save_resource_ram_summary(
         data.groupby("approach", as_index=False)
         .agg(
             measured_runs=("run_id", "count"),
-            warm_start_ram_mb=("ram_baseline_mb", "median"),
+            warm_start_baseline_ram_mb=("ram_baseline_mb", "median"),
+            warm_start_ram_mb=("ram_peak_mb", "median"),
+            warm_start_delta_peak_ram_mb=("ram_delta_peak_mb", "median"),
         )
         .sort_values("approach")
     )
@@ -490,7 +496,9 @@ def save_resource_ram_summary(
                 "cold_start_item_id": result.cold_start_item_id,
                 "cold_start_word": result.cold_start_word,
                 "cold_start_path": result.cold_start_path,
+                "cold_start_baseline_ram_mb": result.cold_start_baseline_ram_mb,
                 "cold_start_ram_mb": result.cold_start_ram_mb,
+                "cold_start_delta_peak_ram_mb": result.cold_start_delta_peak_ram_mb,
                 "cold_error": result.cold_error,
             }
             for result in cold_results
